@@ -636,12 +636,24 @@ export default function BookRatingModal({
   };
 
   const handleSkip = () => {
-    if (!currentComparisonBook) return;
+    if (!remainingComparisons.length) return;
     
-    const newBook = getRandomBook(
-      orderedBookRatings.filter((b) => b.book_id !== currentComparisonBook.id)
+    // Filter out the current comparison book if it exists
+    const availableBooks = remainingComparisons.filter(
+      book => currentComparisonBook && book.book_id !== currentComparisonBook.id
     );
-    setCurrentComparisonBook(newBook);
+    
+    if (availableBooks.length === 0) return;
+    
+    // Get a random book from the remaining comparisons
+    const randomIndex = Math.floor(Math.random() * availableBooks.length);
+    const nextBook = availableBooks[randomIndex];
+    
+    setCurrentComparisonBook({
+      id: nextBook.book_id,
+      title: nextBook.book?.title ?? 'Unknown',
+      author: nextBook.book?.author ?? 'Unknown'
+    });
   };
 
   const calculateRatings = (
@@ -1085,6 +1097,15 @@ export default function BookRatingModal({
             </Pressable>
           </View>
 
+          {/* Too Tough Button (Centered) */}
+          <Pressable 
+            style={styles.tooToughButton}
+            onPress={handleTooTough}
+          >
+            <Text style={styles.tooToughText}>too tough</Text>
+          </Pressable>
+
+          {/* Bottom Actions Row */}
           <View style={styles.actionButtons}>
             <View style={styles.leftActions}>
               <Pressable 
@@ -1101,10 +1122,11 @@ export default function BookRatingModal({
 
             <View style={styles.rightActions}>
               <Pressable 
-                style={styles.tooToughButton}
-                onPress={handleTooTough}
+                style={styles.skipButton}
+                onPress={handleSkip}
               >
-                <Text style={styles.tooToughText}>too tough</Text>
+                <Text style={styles.skipButtonText}>skip</Text>
+                <ChevronRight size={14} color="#666" />
               </Pressable>
             </View>
           </View>
@@ -1353,7 +1375,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     borderRadius: 20,
     backgroundColor: '#f0f0f0',
-    marginTop: 10,
+    marginTop: 20,
+    marginBottom: 20,
+    alignSelf: 'center',
   },
   tooToughText: {
     fontSize: 12,
@@ -1543,5 +1567,19 @@ const styles = StyleSheet.create({
   },
   undoButtonTextDisabled: {
     color: '#ccc',
+  },
+  skipButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 16,
+    backgroundColor: '#f0f0f0',
+    gap: 2,
+  },
+  skipButtonText: {
+    fontSize: 11,
+    color: '#666',
+    textTransform: 'lowercase',
   },
 });

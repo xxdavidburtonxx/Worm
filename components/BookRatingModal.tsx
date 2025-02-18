@@ -35,7 +35,7 @@ interface Props {
   book: GoogleBook;
   isVisible: boolean;
   onClose: () => void;
-  source: SourceContext; // Add this prop
+  onSuccess?: () => void;
 }
 
 // Add sentiment type
@@ -54,9 +54,9 @@ interface SentimentRanges {
 
 // Update sentiment ranges to use floats with clear boundaries
 const sentimentRanges: SentimentRanges = {
-  loved: { min: 7.0, max: 10.0 },
-  liked: { min: 5.0, max: 6.9 },
-  hated: { min: 1.0, max: 4.9 }
+  loved: { min: 7.1, max: 10.0 },
+  liked: { min: 5.1, max: 7.0 },
+  hated: { min: 1.0, max: 5.0 }
 };
 
 // Add these type definitions at the top with other types
@@ -67,18 +67,31 @@ interface BookRating {
   rating: number;
 }
 
+interface UserBook {
+  user_id: string;  // UUID
+  book_id: number;  // bigint/int8
+  status: 'READ' | 'WANT_TO_READ';
+  rating: number | null;
+  review: string | null;
+  user_sentiment: 'loved' | 'liked' | 'hated' | null;
+}
+
 export default function BookRatingModal({
   book,
   isVisible,
   onClose,
-  source,
+  onSuccess,
 }: Props) {
   const { supabase } = useSupabase();
   const { user } = useAuth();
   const router = useRouter();
-  const [sentiment, setSentiment] = useState<Sentiment | null>(null);
+  const [sentiment, setSentiment] = useState<'loved' | 'liked' | 'hated' | null>(null);
   const [orderedBookRatings, setOrderedBookRatings] = useState<UserBook[]>([]);
-  const [currentComparisonBook, setCurrentComparisonBook] = useState<UserBook | null>(null);
+  const [currentComparisonBook, setCurrentComparisonBook] = useState<{
+    id: number;
+    title: string;
+    author: string;
+  } | null>(null);
   const [review, setReview] = useState("");
   const [showReview, setShowReview] = useState(false);
   const [comparisonHistory, setComparisonHistory] = useState<UserBook[]>([]);
@@ -88,12 +101,12 @@ export default function BookRatingModal({
   const [fadeAnim] = useState(new Animated.Value(0));
   const [slideAnim] = useState(new Animated.Value(100));
   const [showComparison, setShowComparison] = useState(false);
-
-  useEffect(() => {
-    if (sentiment) {
-      fetchRatedBooks();
-    }
-  }, [sentiment]);
+  const [newBookData, setNewBookData] = useState<any>(null);
+  const [availableComparisonBooks, setAvailableComparisonBooks] = useState<UserBook[]>([]);
+  const [lowerBound, setLowerBound] = useState<number | null>(null);
+  const [upperBound, setUpperBound] = useState<number | null>(null);
+  const [comparedBooks, setComparedBooks] = useState<Set<number>>(new Set());
+  const [remainingComparisons, setRemainingComparisons] = useState<UserBook[]>([]);
 
   useEffect(() => {
     if (isVisible) {
@@ -113,76 +126,97 @@ export default function BookRatingModal({
     }
   }, [isVisible]);
 
-  const fetchRatedBooks = async () => {
-    try {
-      const { data } = await supabase
-        .from("user_books")
-        .select(
-          `
-          *,
-          book:books (*)
-        `,
-        )
-        .eq("user_id", user?.id)
-        .eq("user_sentiment", sentiment)
-        .order("rating", { ascending: false });
+  useEffect(() => {
+    const addBookToDatabase = async () => {
+      if (!isVisible || !book) return;
 
-      if (data && data.length > 0) {
-        setOrderedBookRatings(data);
-        setCurrentComparisonBook(getRandomBook(data));
-      } else {
-        setShowReview(true);
+      try {
+        // Check if book already exists
+        const { data: existingBook } = await supabase
+          .from('books')
+          .select('id')
+          .eq('google_book_id', book.id);
+
+        if (!existingBook || existingBook.length === 0) {
+          // Book doesn't exist, add it
+          const newBookData = {
+            google_book_id: book.id,
+            title: book.volumeInfo.title,
+            author: book.volumeInfo.authors?.[0] || 'Unknown',
+            publisher: book.volumeInfo.publisher,
+            published_date: book.volumeInfo.publishedDate,
+            description: book.volumeInfo.description,
+            cover_url: book.volumeInfo.imageLinks?.thumbnail,
+            category: book.volumeInfo.categories?.[0] || null,
+          };
+
+          const { error } = await supabase
+            .from('books')
+            .insert(newBookData);
+
+          if (error) throw error;
+        }
+      } catch (error) {
+        console.error('Error adding book to database:', error);
+        showToast.error({
+          title: 'Error',
+          message: 'Failed to initialize book data'
+        });
       }
-    } catch (error) {
-      console.error("Error fetching rated books:", error);
-    }
-  };
+    };
+
+    addBookToDatabase();
+  }, [isVisible, book]);
 
   const getRandomBook = (books: any[]) => {
     return books[Math.floor(Math.random() * books.length)];
   };
 
-  // Step 1: Get user sentiment and fetch comparison books
-  const handleSentimentSelect = async (selected: Sentiment) => {
-    setSentiment(selected);
+  // Handle sentiment selection
+  const handleSentimentSelect = async (newSentiment: 'loved' | 'liked' | 'hated') => {
+    setSentiment(newSentiment);
+    setIsLoading(true);
+    setComparedBooks(new Set());
     
     try {
-      // Fetch books with same sentiment for comparison
-      const { data: comparisonBooks } = await supabase
+      const { data: existingBooks, error } = await supabase
         .from('user_books')
-        .select('*, book:books(*)')
-        .eq('user_id', user?.id)
-        .eq('user_sentiment', selected)
+        .select(`
+          *,
+          book:books (
+            id,
+            title,
+            author
+          )
+        `)
+        .eq('user_id', user.id)
+        .eq('user_sentiment', newSentiment)
         .order('rating', { ascending: false });
 
-      if (!comparisonBooks || comparisonBooks.length === 0) {
-        // First book in this sentiment category
-        const range = sentimentRanges[selected];
-        const averageRating = (range.min + range.max) / 2;
+      if (error) throw error;
+
+      if (existingBooks && existingBooks.length > 0) {
+        setOrderedBookRatings(existingBooks);
+        setRemainingComparisons(existingBooks); // Initialize remaining comparisons
         
-        // Create book entry with average rating
-        const bookId = await ensureBookExists(book);
-        await supabase.from("user_books").insert({
-          user_id: user?.id,
-          book_id: bookId,
-          rating: averageRating,
-          status: "READ",
-          user_sentiment: selected,
-          tied_book_ids: []
+        // Start with a random book
+        const randomIndex = Math.floor(Math.random() * existingBooks.length);
+        const comparisonBook = existingBooks[randomIndex];
+        
+        setCurrentComparisonBook({
+          id: comparisonBook.book.id,
+          title: comparisonBook.book.title,
+          author: comparisonBook.book.author
         });
-        
-        setShowReview(true);
-      } else {
-        setOrderedBookRatings(comparisonBooks);
-        setCurrentComparisonBook(getRandomBook(comparisonBooks));
         setShowComparison(true);
+      } else {
+        setShowReview(true);
       }
     } catch (error) {
       console.error('Error fetching comparison books:', error);
-      showToast.error({
-        title: "Error",
-        message: "Failed to load comparison books"
-      });
+      setShowReview(true);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -191,80 +225,128 @@ export default function BookRatingModal({
     // Set orderedBookRatings
   };
 
-  const handlePreferCurrent = async () => {
-    if (!currentComparisonBook) return;
-
-    // Add to comparison history for undo
-    setComparisonHistory(prev => [...prev, currentComparisonBook]);
-
-    // Find next book to compare with
-    const currentIndex = orderedBookRatings.findIndex(b => b.id === currentComparisonBook.id);
-    const nextIndex = currentIndex - 1; // Move up the list since current book was better
-
-    if (nextIndex >= 0) {
-      // Continue comparisons with next book
-      setCurrentComparisonBook(orderedBookRatings[nextIndex]);
-    } else {
-      // Reached the top of the list
-      setShowReview(true);
-      calculateFinalRating('top');
-    }
-  };
-
   const handlePreferComparison = async () => {
-    if (!currentComparisonBook) return;
+    if (!currentComparisonBook || !remainingComparisons.length) return;
 
-    setComparisonHistory(prev => [...prev, currentComparisonBook]);
+    setComparedBooks(prev => new Set([...prev, currentComparisonBook.id]));
 
-    // Find next book to compare with
-    const currentIndex = orderedBookRatings.findIndex(b => b.id === currentComparisonBook.id);
-    const nextIndex = currentIndex + 1; // Move down the list since comparison book was better
-
-    if (nextIndex < orderedBookRatings.length) {
-      // Continue comparisons with next book
-      setCurrentComparisonBook(orderedBookRatings[nextIndex]);
-    } else {
-      // Reached the bottom of the list
-      setShowReview(true);
-      calculateFinalRating('bottom');
-    }
-  };
-
-  const calculateFinalRating = (position: 'top' | 'bottom' | 'middle') => {
-    const range = sentimentRanges[sentiment!];
-    let rating: number;
-
-    switch (position) {
-      case 'top':
-        // Best book in this sentiment category
-        rating = range.max;
-        break;
-      case 'bottom':
-        // Worst book in this sentiment category
-        rating = range.min;
-        break;
-      case 'middle':
-        // Somewhere in between - calculate based on position
-        const index = comparisonHistory.length;
-        const totalBooks = orderedBookRatings.length;
-        const position = index / totalBooks;
-        rating = range.min + (range.max - range.min) * position;
-        break;
-    }
-
-    return rating;
-  };
-
-  const handleEquallyGood = async () => {
-    if (!currentComparisonBook) return;
-    await handleTooTough(); // This creates a tie between the books
-  };
-
-  const handleSkip = () => {
-    const newBook = getRandomBook(
-      orderedBookRatings.filter((b) => b.id !== currentComparisonBook?.id),
+    // Find current comparison book's index in the FULL ordered list
+    const currentIndex = orderedBookRatings.findIndex(
+      b => b.book_id === currentComparisonBook.id
     );
-    setCurrentComparisonBook(newBook);
+
+    console.log('User preferred new book over existing:', {
+      newBook: book.volumeInfo.title,
+      existingBook: currentComparisonBook.title,
+      existingBookCurrentIndex: currentIndex,
+      existingBookRating: orderedBookRatings[currentIndex]?.rating,
+      fullOrderedList: orderedBookRatings.map(b => ({
+        id: b.book_id,
+        rating: b.rating,
+        title: b.book.title
+      }))
+    });
+
+    // Get only the books rated higher than current comparison
+    const higherRatedBooks = remainingComparisons.filter(b => 
+      b.book_id !== currentComparisonBook.id && 
+      b.rating > orderedBookRatings[currentIndex].rating
+    );
+
+    if (higherRatedBooks.length === 0) {
+      // We preferred the new book over the existing book,
+      // and there are no more higher rated books to compare against
+      const finalPosition = currentIndex;
+      console.log('Found final position:', {
+        reason: 'New book preferred over existing, no higher rated books left',
+        newBookGoesBeforeId: currentComparisonBook.id,
+        finalPosition,
+        currentIndex,
+        existingBookTitle: currentComparisonBook.title
+      });
+      await updateAllBookRatings(finalPosition);
+      setShowComparison(false);
+      setShowReview(true);
+      return;
+    }
+
+    // Update remaining comparisons and pick next book
+    setRemainingComparisons(higherRatedBooks);
+    
+    if (higherRatedBooks.length > 0) {
+      const randomIndex = Math.floor(Math.random() * higherRatedBooks.length);
+      const nextComparisonBook = higherRatedBooks[randomIndex];
+      
+      console.log('Moving to next comparison:', {
+        nextBook: nextComparisonBook.book.title,
+        remainingOptions: higherRatedBooks.length
+      });
+      
+      setCurrentComparisonBook({
+        id: nextComparisonBook.book_id,
+        title: nextComparisonBook.book.title,
+        author: nextComparisonBook.book.author
+      });
+    }
+  };
+
+  const handlePreferCurrent = async () => {
+    if (!currentComparisonBook || !remainingComparisons.length) return;
+
+    setComparedBooks(prev => new Set([...prev, currentComparisonBook.id]));
+
+    // Find current comparison book's index in the FULL ordered list
+    const currentIndex = orderedBookRatings.findIndex(
+      b => b.book_id === currentComparisonBook.id
+    );
+
+    console.log('User preferred existing book over new:', {
+      existingBook: currentComparisonBook.title,
+      newBook: book.volumeInfo.title,
+      existingBookCurrentIndex: currentIndex,
+      existingBookRating: orderedBookRatings[currentIndex]?.rating,
+      fullOrderedList: orderedBookRatings.map(b => ({
+        id: b.book_id,
+        rating: b.rating,
+        title: b.book.title
+      }))
+    });
+
+    const lowerRatedBooks = remainingComparisons.slice(currentIndex + 1);
+
+    if (lowerRatedBooks.length === 0) {
+      // We preferred the existing book over the new book,
+      // so it should go one position LOWER than the current book
+      const finalPosition = currentIndex + 1;
+      console.log('Found final position:', {
+        reason: 'Existing book preferred over new, no lower rated books left',
+        newBookGoesAfterId: currentComparisonBook.id,
+        finalPosition,
+        currentIndex,
+        existingBookTitle: currentComparisonBook.title
+      });
+      await updateAllBookRatings(finalPosition);
+      setShowComparison(false);
+      setShowReview(true);
+    } else {
+      // Update remaining comparisons to only include lower rated books
+      setRemainingComparisons(lowerRatedBooks);
+      
+      // Pick a random book from remaining lower-rated books
+      const randomIndex = Math.floor(Math.random() * lowerRatedBooks.length);
+      const nextComparisonBook = lowerRatedBooks[randomIndex];
+      
+      console.log('Moving to next comparison:', {
+        nextBook: nextComparisonBook.book.title,
+        remainingOptions: lowerRatedBooks.length
+      });
+      
+      setCurrentComparisonBook({
+        id: nextComparisonBook.book_id,
+        title: nextComparisonBook.book.title,
+        author: nextComparisonBook.book.author
+      });
+    }
   };
 
   const handleTooTough = async () => {
@@ -317,75 +399,137 @@ export default function BookRatingModal({
     }
   };
 
+  const calculateFinalRating = (position: 'top' | 'bottom' | 'middle') => {
+    const range = sentimentRanges[sentiment!];
+    let rating: number;
+
+    switch (position) {
+      case 'top':
+        // Best book in this sentiment category
+        rating = range.max;
+        break;
+      case 'bottom':
+        // Worst book in this sentiment category
+        rating = range.min;
+        break;
+      case 'middle':
+        // Somewhere in between - calculate based on position
+        const index = comparisonHistory.length;
+        const totalBooks = orderedBookRatings.length;
+        const position = index / totalBooks;
+        rating = range.min + (range.max - range.min) * position;
+        break;
+    }
+
+    return rating;
+  };
+
+  const handleEquallyGood = async () => {
+    if (!currentComparisonBook) return;
+    await handleTooTough(); // This creates a tie between the books
+  };
+
+  const handleSkip = () => {
+    const newBook = getRandomBook(
+      orderedBookRatings.filter((b) => b.id !== currentComparisonBook?.id),
+    );
+    setCurrentComparisonBook(newBook);
+  };
+
+  const calculateRatings = (sentiment: 'loved' | 'liked' | 'hated', orderedBooks: any[]): (number | null)[] => {
+    const ranges = {
+      loved: { min: 7.1, max: 10.0 },
+      liked: { min: 5.1, max: 7.0 },
+      hated: { min: 1.0, max: 5.0 }
+    };
+
+    const range = ranges[sentiment];
+    const totalBooks = orderedBooks.length;
+    
+    if (totalBooks === 1) {
+      // First book in category gets null rating
+      return [null];
+    }
+
+    // Calculate interval between ratings
+    const interval = (range.max - range.min) / (totalBooks - 1);
+    
+    // Return array of ratings, starting from highest to lowest
+    // orderedBooks should be in descending order (best to worst)
+    return orderedBooks.map((_, index) => {
+      // Calculate rating: max - (interval * index)
+      // This gives highest rating to first book, lowest to last
+      const rating = Number((range.max - (interval * index)).toFixed(1));
+      return rating;
+    });
+  };
+
   const handleSubmit = async () => {
-    if (!sentiment || !user) return;
+    if (!user || !sentiment) return;
 
     setIsSubmitting(true);
+    setError(null);
+
     try {
-      const bookId = await ensureBookExists(book);
-      const finalRatings = calculateFinalRatings();
+      // Get the book's ID from the database
+      const { data: bookData } = await supabase
+        .from('books')
+        .select('id')
+        .eq('google_book_id', book.id)
+        .single();
 
-      // Group tied books together to ensure they get the same rating
-      const tiedGroups = new Map<number, string[]>();
-      orderedBookRatings.forEach(book => {
-        if (book.tied_book_ids?.length > 0) {
-          const rating = finalRatings.find(r => r.bookId === book.book_id)?.rating;
-          if (rating) {
-            const group = tiedGroups.get(rating) || [];
-            tiedGroups.set(rating, [...group, book.book_id, ...book.tied_book_ids]);
-          }
-        }
-      });
+      if (!bookData) throw new Error('Book not found');
 
-      // Update all books, ensuring tied books get the same rating
-      await Promise.all(
-        finalRatings.map(async (rating) => {
-          const tiedGroup = Array.from(tiedGroups.values())
-            .find(group => group.includes(rating.bookId));
-          
-          await supabase.from("user_books").upsert({
-            user_id: user.id,
-            book_id: rating.bookId,
-            rating: rating.rating,
-            status: "READ",
-            user_sentiment: sentiment,
-            review: rating.bookId === bookId ? review : undefined,
-            tied_book_ids: tiedGroup || []
-          });
+      // First try to update the review for an existing book
+      const { data: updateData, error: updateError } = await supabase
+        .from('user_books')
+        .update({
+          review: review.trim() || null,
+          updated_at: new Date().toISOString()
         })
-      );
+        .eq('book_id', bookData.id)
+        .eq('user_id', user.id)
+        .select();
+
+      // If update failed because book doesn't exist yet, insert new row
+      if (updateError?.code === '23503' || !updateData || updateData.length === 0) {
+        console.log('Book not found in user_books, inserting new row');
+        
+        const { error: insertError } = await supabase
+          .from('user_books')
+          .insert({
+            user_id: user.id,
+            book_id: bookData.id,
+            rating: null, // First book in category gets null rating
+            review: review.trim() || null,
+            user_sentiment: sentiment,
+            status: 'READ',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            tied_with_books: null,
+            tied_book_ids: null
+          });
+
+        if (insertError) throw insertError;
+      }
 
       showToast.success({
-        title: "Rating saved!",
-        message: `You ${sentiment} this book!`
+        title: 'Success',
+        message: 'Your review has been saved'
       });
 
+      onSuccess?.();
       onClose();
     } catch (error) {
-      console.error("Error submitting review:", error);
-      setError("Failed to submit review. Please try again.");
+      console.error('Error in submission process:', error);
+      setError('Failed to save review');
+      showToast.error({
+        title: 'Error',
+        message: 'Failed to save review'
+      });
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  const calculateFinalRatings = () => {
-    if (!sentiment) return [];
-
-    const sentimentRanges = {
-      loved: { min: 7, max: 10 },
-      liked: { min: 5, max: 7 },
-      hated: { min: 1, max: 5 },
-    };
-
-    const range = sentimentRanges[sentiment];
-    const totalBooks = orderedBookRatings.length + 1;
-    const interval = (range.max - range.min) / (totalBooks - 1);
-
-    return orderedBookRatings.map((book, index) => ({
-      bookId: book.book_id,
-      rating: Number((range.min + interval * index).toFixed(1)),
-    }));
   };
 
   const calculateTiedBooks = () => {
@@ -399,9 +543,9 @@ export default function BookRatingModal({
     [...orderedBookRatings].forEach((book) => {
       if (previousRating === null) {
         previousRating = book.rating;
-        currentTiedGroup = [book.book_id];
+        currentTiedGroup = [book.book_id.toString()];
       } else if (book.rating === previousRating) {
-        currentTiedGroup.push(book.book_id);
+        currentTiedGroup.push(book.book_id.toString());
       } else {
         // Store tied group if more than one book
         if (currentTiedGroup.length > 1) {
@@ -412,7 +556,7 @@ export default function BookRatingModal({
             );
           });
         }
-        currentTiedGroup = [book.book_id];
+        currentTiedGroup = [book.book_id.toString()];
         previousRating = book.rating;
       }
     });
@@ -493,6 +637,102 @@ export default function BookRatingModal({
     }
   };
 
+  // Add this function to update all book ratings
+  const updateAllBookRatings = async (newBookPosition: number) => {
+    try {
+      // Get the book ID from the database first
+      const { data: bookData } = await supabase
+        .from('books')
+        .select('id')
+        .eq('google_book_id', book.id)
+        .single();
+
+      if (!bookData) {
+        throw new Error('Book not found in database');
+      }
+
+      // Get all books in this sentiment category
+      const { data: existingBooks } = await supabase
+        .from('user_books')
+        .select('*')
+        .eq('user_id', user.id)
+        .eq('user_sentiment', sentiment)
+        .order('rating', { ascending: false });
+
+      if (!existingBooks) {
+        throw new Error('Failed to fetch existing books');
+      }
+
+      console.log('Current books in category:', existingBooks.map(b => ({
+        id: b.book_id,
+        rating: b.rating
+      })));
+
+      // Create new ordered list with the new book in the correct position
+      // Note: newBookPosition represents where the new book should go in the rating order
+      // If newBookPosition is 1, it should go between the first and second book
+      const updatedOrderedBooks = [
+        ...existingBooks.slice(0, newBookPosition),
+        { book_id: bookData.id }, // New book
+        ...existingBooks.slice(newBookPosition)
+      ];
+
+      console.log('New book order:', {
+        position: newBookPosition,
+        order: updatedOrderedBooks.map(b => b.book_id),
+        explanation: `Inserting book ${bookData.id} at position ${newBookPosition}`
+      });
+
+      // Calculate new ratings for all books
+      const newRatings = calculateRatings(sentiment!, updatedOrderedBooks);
+
+      console.log('New ratings calculated:', newRatings.map((rating, index) => ({
+        bookId: updatedOrderedBooks[index].book_id,
+        rating
+      })));
+
+      // First insert the new book with its calculated rating
+      const { error: insertError } = await supabase
+        .from('user_books')
+        .insert({
+          user_id: user.id,
+          book_id: bookData.id,
+          rating: newRatings[newBookPosition], // Use newBookPosition to get correct rating
+          user_sentiment: sentiment,
+          status: 'READ',
+          review: null,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          tied_with_books: null,
+          tied_book_ids: null
+        });
+
+      if (insertError) throw insertError;
+
+      // Then update all existing books with their new ratings
+      await Promise.all(
+        existingBooks.map((book, index) => {
+          // If the book's position is after or at the insertion point,
+          // its new rating is one position later in the newRatings array
+          const newIndex = index >= newBookPosition ? index + 1 : index;
+          return supabase
+            .from('user_books')
+            .update({
+              rating: newRatings[newIndex],
+              updated_at: new Date().toISOString()
+            })
+            .eq('book_id', book.book_id)
+            .eq('user_id', user.id);
+        })
+      );
+
+      console.log('Successfully updated all book ratings');
+    } catch (error) {
+      console.error('Error updating book ratings:', error);
+      throw error;
+    }
+  };
+
   // Move the auth check before the modal content
   if (!user) {
     return (
@@ -541,39 +781,128 @@ export default function BookRatingModal({
   // Comparison view asking which book they preferred
   const renderComparisonView = () => (
     <View style={styles.comparisonContainer}>
-      <Text style={styles.sectionTitle}>Which did you prefer?</Text>
-      <View style={styles.booksContainer}>
-        {/* Left book (Google Books result) */}
-        <Pressable onPress={handlePreferCurrent}>
-          <CachedImage
-            uri={book.volumeInfo.imageLinks?.thumbnail || ''}
-            style={styles.bookCover}
-          />
-          <Text style={styles.bookTitle}>{book.volumeInfo.title}</Text>
-        </Pressable>
-
-        {/* Right book (from Supabase) */}
-        {currentComparisonBook && (
-          <Pressable onPress={handlePreferComparison}>
-            <CachedImage
-              uri={currentComparisonBook.book.cover_url}
-              style={styles.bookCover}
-            />
-            <Text style={styles.bookTitle}>{currentComparisonBook.book.title}</Text>
+      <Text style={styles.question}>Which book did you prefer?</Text>
+      {isLoading ? (
+        <ActivityIndicator size="large" color="#007AFF" />
+      ) : (
+        <View style={styles.booksContainer}>
+          {/* Left Book Card */}
+          <Pressable 
+            style={({ pressed }) => [
+              styles.bookCard,
+              styles.clickableCard,
+              pressed && styles.cardPressed
+            ]}
+            onPress={handlePreferCurrent}
+          >
+            <View style={styles.bookContent}>
+              <Text style={styles.bookTitle} numberOfLines={2}>
+                {currentComparisonBook?.title || 'Loading...'}
+              </Text>
+              <Text style={styles.bookAuthor} numberOfLines={1}>
+                {currentComparisonBook?.author || ''}
+              </Text>
+            </View>
           </Pressable>
-        )}
 
-        <View style={styles.comparisonActions}>
-          <Pressable onPress={handleEquallyGood}>
-            <Text>Equally good</Text>
-          </Pressable>
-          <Pressable onPress={handleSkip}>
-            <Text>Skip</Text>
+          {/* Right Book Card */}
+          <Pressable 
+            style={({ pressed }) => [
+              styles.bookCard,
+              styles.clickableCard,
+              pressed && styles.cardPressed
+            ]}
+            onPress={handlePreferComparison}
+          >
+            <View style={styles.bookContent}>
+              <Text style={styles.bookTitle} numberOfLines={2}>
+                {book.volumeInfo.title}
+              </Text>
+              <Text style={styles.bookAuthor} numberOfLines={1}>
+                {book.volumeInfo.authors?.[0]}
+              </Text>
+            </View>
           </Pressable>
         </View>
-      </View>
+      )}
+
+      <Pressable 
+        style={styles.tooToughButton}
+        onPress={handleTooTough}
+      >
+        <Text style={styles.tooToughText}>too tough</Text>
+      </Pressable>
     </View>
   );
+
+  // Add the review component render
+  const renderReviewView = () => (
+    <View style={styles.container}>
+      <Text style={styles.question}>Add a review (optional)</Text>
+      <TextInput
+        style={styles.reviewInput}
+        value={review}
+        onChangeText={setReview}
+        placeholder="Write your review..."
+        multiline
+      />
+      <Pressable 
+        style={[
+          styles.submitButton,
+          isSubmitting && styles.submitButtonDisabled
+        ]}
+        onPress={handleSubmit}
+        disabled={isSubmitting}
+      >
+        {isSubmitting ? (
+          <ActivityIndicator size="small" color="#FFFFFF" />
+        ) : (
+          <Text style={styles.submitButtonText}>Submit</Text>
+        )}
+      </Pressable>
+    </View>
+  );
+
+  const renderContent = () => {
+    if (!sentiment) {
+      // Show sentiment selection first
+      return (
+        <View style={styles.container}>
+          <Text style={styles.question}>What did you think?</Text>
+          <View style={styles.sentimentButtons}>
+            <Pressable
+              style={[styles.button, sentiment === 'loved' && styles.selectedSentiment]}
+              onPress={() => handleSentimentSelect('loved')}
+            >
+              <Text>I loved it</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.button, sentiment === 'liked' && styles.selectedSentiment]}
+              onPress={() => handleSentimentSelect('liked')}
+            >
+              <Text>I liked it</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.button, sentiment === 'hated' && styles.selectedSentiment]}
+              onPress={() => handleSentimentSelect('hated')}
+            >
+              <Text>Not for me</Text>
+            </Pressable>
+          </View>
+        </View>
+      );
+    }
+
+    if (showComparison) {
+      return renderComparisonView();
+    }
+
+    if (showReview) {
+      return renderReviewView();
+    }
+
+    return null;
+  };
 
   return (
     <Modal
@@ -615,42 +944,7 @@ export default function BookRatingModal({
             </Text>
           </View>
 
-          {/* Updated Sentiment Selection */}
-          {!sentiment && (
-            renderSentimentSelection()
-          )}
-
-          {/* Book Comparison */}
-          {!showComparison && sentiment && !showReview && orderedBookRatings.length > 0 && currentComparisonBook && (
-            renderComparisonView()
-          )}
-
-          {/* Review Section */}
-          {showReview && (
-            <View style={styles.reviewContainer}>
-              <Text style={styles.sectionTitle}>Leave a review</Text>
-              <TextInput
-                style={styles.reviewInput}
-                multiline
-                numberOfLines={4}
-                placeholder="Share your thoughts about this book..."
-                value={review}
-                onChangeText={setReview}
-              />
-              <Pressable
-                style={[
-                  styles.submitButton,
-                  isSubmitting && styles.submitButtonDisabled,
-                ]}
-                onPress={handleSubmit}
-                disabled={isSubmitting}
-              >
-                <Text style={styles.submitButtonText}>
-                  {isSubmitting ? "Submitting..." : "Submit Review"}
-                </Text>
-              </Pressable>
-            </View>
-          )}
+          {renderContent()}
         </Animated.View>
       </Animated.View>
     </Modal>
@@ -725,68 +1019,119 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   comparisonContainer: {
-    alignItems: "center",
-    gap: 16,
+    padding: 20,
+    width: '100%',
+    alignItems: 'center',
   },
-  comparisonBooks: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 12,
+  question: {
+    fontSize: 24,
+    fontWeight: '600',
+    marginBottom: 20,
+    textAlign: 'center',
   },
-  bookChoice: {
+  booksContainer: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    width: '100%',
+    marginBottom: 20,
+    gap: 15,
+  },
+  bookCard: {
     flex: 1,
-    backgroundColor: "#f8f8f8",
+    backgroundColor: '#f5f5f5',
     borderRadius: 12,
     padding: 16,
-    alignItems: "center",
-    minHeight: 120,
-    justifyContent: "center",
+    height: 120,
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
+    margin: 8,
   },
-  orText: {
+  bookContent: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bookTitle: {
     fontSize: 16,
-    fontWeight: "600",
-    color: "#666",
+    fontWeight: '600',
+    textAlign: 'center',
+    marginBottom: 4,
+    maxWidth: '100%',
   },
-  actionButtons: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    width: "100%",
-    marginTop: 16,
+  bookAuthor: {
+    fontSize: 14,
+    color: '#666',
+    textAlign: 'center',
   },
-  actionButton: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-    padding: 8,
+  tooToughButton: {
+    paddingVertical: 8,
+    paddingHorizontal: 16,
+    borderRadius: 20,
+    backgroundColor: '#f0f0f0',
+    marginTop: 10,
   },
-  actionText: {
-    color: "#007AFF",
+  tooToughText: {
+    fontSize: 12,
+    color: '#666',
+    textTransform: 'lowercase',
+  },
+  vsText: {
+    marginHorizontal: 10,
     fontSize: 16,
+    fontWeight: '600',
+  },
+  comparisonActions: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 20,
+  },
+  comparisonButton: {
+    backgroundColor: '#007AFF',
+    padding: 10,
+    borderRadius: 8,
+    flex: 1,
+    marginHorizontal: 5,
+    alignItems: 'center',
+  },
+  buttonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
   reviewContainer: {
     gap: 16,
   },
   reviewInput: {
-    backgroundColor: "#f8f8f8",
+    width: '100%',
+    minHeight: 100,
+    borderWidth: 1,
+    borderColor: '#ddd',
     borderRadius: 8,
     padding: 12,
-    minHeight: 120,
-    textAlignVertical: "top",
-    fontSize: 16,
+    marginVertical: 16,
+    textAlignVertical: 'top',
   },
   submitButton: {
-    backgroundColor: "#007AFF",
+    backgroundColor: '#007AFF',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
     borderRadius: 8,
-    padding: 16,
-    alignItems: "center",
+    alignItems: 'center',
   },
   submitButtonDisabled: {
     opacity: 0.5,
   },
   submitButtonText: {
-    color: "#fff",
+    color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: "600",
+    fontWeight: '600',
   },
   loadingOverlay: {
     position: "absolute",
@@ -813,12 +1158,6 @@ const styles = StyleSheet.create({
   errorText: {
     color: "#D32F2F",
     fontSize: 14,
-  },
-  bookCover: {
-    width: 100,
-    height: 150,
-    borderRadius: 8,
-    marginBottom: 8,
   },
   authPromptContainer: {
     alignItems: 'center',
@@ -869,20 +1208,26 @@ const styles = StyleSheet.create({
     backgroundColor: '#007AFF',
     color: '#fff',
   },
-  booksContainer: {
-    flexDirection: 'row',
+  tooToughContainer: {
+    flex: 1,
+    justifyContent: 'center',
     alignItems: 'center',
-    gap: 12,
   },
-  comparisonActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    width: '100%',
-    marginTop: 16,
+  tooToughButton: {
+    backgroundColor: '#007AFF',
+    padding: 10,
+    borderRadius: 8,
   },
-  bookTitle: {
+  tooToughText: {
+    color: '#FFFFFF',
     fontSize: 16,
     fontWeight: '600',
-    marginTop: 8,
+  },
+  clickableCard: {
+    backgroundColor: '#ffffff',
+  },
+  cardPressed: {
+    backgroundColor: '#f0f0f0',
+    transform: [{ scale: 0.98 }],
   },
 });

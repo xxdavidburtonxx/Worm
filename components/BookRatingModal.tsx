@@ -96,6 +96,17 @@ interface ComparisonBook {
   author: string;
 }
 
+// Update ComparisonHistoryItem type to include remainingComparisons
+interface ComparisonHistoryItem {
+  comparisonBook: {
+    id: number;
+    title: string;
+    author: string;
+  };
+  preferredNewBook: boolean;
+  remainingComparisons: UserBook[];
+}
+
 export default function BookRatingModal({
   book,
   isVisible,
@@ -114,7 +125,7 @@ export default function BookRatingModal({
   } | null>(null);
   const [review, setReview] = useState("");
   const [showReview, setShowReview] = useState(false);
-  const [comparisonHistory, setComparisonHistory] = useState<UserBook[]>([]);
+  const [comparisonHistory, setComparisonHistory] = useState<ComparisonHistoryItem[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -248,6 +259,13 @@ export default function BookRatingModal({
   const handlePreferComparison = async () => {
     if (!currentComparisonBook || !remainingComparisons.length || !user || !sentiment) return;
 
+    // Add to comparison history before updating state
+    setComparisonHistory(prev => [...prev, {
+      comparisonBook: currentComparisonBook,
+      preferredNewBook: true,
+      remainingComparisons: [...remainingComparisons] // Save current state of remainingComparisons
+    }]);
+
     setComparedBooks(prev => new Set([...prev, currentComparisonBook.id]));
 
     // Find current comparison book's index in the FULL ordered list
@@ -348,6 +366,13 @@ export default function BookRatingModal({
 
   const handlePreferCurrent = async () => {
     if (!currentComparisonBook || !remainingComparisons.length || !user || !sentiment) return;
+
+    // Add to comparison history before updating state
+    setComparisonHistory(prev => [...prev, {
+      comparisonBook: currentComparisonBook,
+      preferredNewBook: false,
+      remainingComparisons: [...remainingComparisons] // Save current state of remainingComparisons
+    }]);
 
     setComparedBooks(prev => new Set([...prev, currentComparisonBook.id]));
 
@@ -944,6 +969,29 @@ export default function BookRatingModal({
     }
   };
 
+  const handleUndo = () => {
+    if (comparisonHistory.length === 0) return;
+
+    // Get the last comparison
+    const lastComparison = comparisonHistory[comparisonHistory.length - 1];
+
+    // Remove the last book from compared books set
+    setComparedBooks(prev => {
+      const newSet = new Set(prev);
+      newSet.delete(lastComparison.comparisonBook.id);
+      return newSet;
+    });
+
+    // Set the current comparison book back to the previous one
+    setCurrentComparisonBook(lastComparison.comparisonBook);
+
+    // Restore the remaining comparisons to their previous state
+    setRemainingComparisons(lastComparison.remainingComparisons);
+
+    // Remove the last comparison from history
+    setComparisonHistory(prev => prev.slice(0, -1));
+  };
+
   // Move the auth check before the modal content
   if (!user) {
     return (
@@ -996,53 +1044,72 @@ export default function BookRatingModal({
       {isLoading ? (
         <ActivityIndicator size="large" color="#007AFF" />
       ) : (
-        <View style={styles.booksContainer}>
-          {/* Left Book Card */}
-          <Pressable 
-            style={({ pressed }) => [
-              styles.bookCard,
-              styles.clickableCard,
-              pressed && styles.cardPressed
-            ]}
-            onPress={handlePreferCurrent}
-          >
-            <View style={styles.bookContent}>
-              <Text style={styles.bookTitle} numberOfLines={2}>
-                {currentComparisonBook?.title || 'Loading...'}
-              </Text>
-              <Text style={styles.bookAuthor} numberOfLines={1}>
-                {currentComparisonBook?.author || ''}
-              </Text>
-            </View>
-          </Pressable>
+        <>
+          <View style={styles.booksContainer}>
+            {/* Left Book Card */}
+            <Pressable 
+              style={({ pressed }) => [
+                styles.bookCard,
+                styles.clickableCard,
+                pressed && styles.cardPressed
+              ]}
+              onPress={handlePreferCurrent}
+            >
+              <View style={styles.bookContent}>
+                <Text style={styles.bookTitle} numberOfLines={2}>
+                  {currentComparisonBook?.title || 'Loading...'}
+                </Text>
+                <Text style={styles.bookAuthor} numberOfLines={1}>
+                  {currentComparisonBook?.author || ''}
+                </Text>
+              </View>
+            </Pressable>
 
-          {/* Right Book Card */}
-          <Pressable 
-            style={({ pressed }) => [
-              styles.bookCard,
-              styles.clickableCard,
-              pressed && styles.cardPressed
-            ]}
-            onPress={handlePreferComparison}
-          >
-            <View style={styles.bookContent}>
-              <Text style={styles.bookTitle} numberOfLines={2}>
-                {book.volumeInfo.title}
-              </Text>
-              <Text style={styles.bookAuthor} numberOfLines={1}>
-                {book.volumeInfo.authors?.[0]}
-              </Text>
+            {/* Right Book Card */}
+            <Pressable 
+              style={({ pressed }) => [
+                styles.bookCard,
+                styles.clickableCard,
+                pressed && styles.cardPressed
+              ]}
+              onPress={handlePreferComparison}
+            >
+              <View style={styles.bookContent}>
+                <Text style={styles.bookTitle} numberOfLines={2}>
+                  {book.volumeInfo.title}
+                </Text>
+                <Text style={styles.bookAuthor} numberOfLines={1}>
+                  {book.volumeInfo.authors?.[0]}
+                </Text>
+              </View>
+            </Pressable>
+          </View>
+
+          <View style={styles.actionButtons}>
+            <View style={styles.leftActions}>
+              <Pressable 
+                style={[styles.undoButton, !comparisonHistory.length && styles.undoButtonDisabled]}
+                onPress={handleUndo}
+                disabled={!comparisonHistory.length}
+              >
+                <ChevronLeft size={14} color={comparisonHistory.length ? "#666" : "#ccc"} />
+                <Text style={[styles.undoButtonText, !comparisonHistory.length && styles.undoButtonTextDisabled]}>
+                  undo
+                </Text>
+              </Pressable>
             </View>
-          </Pressable>
-        </View>
+
+            <View style={styles.rightActions}>
+              <Pressable 
+                style={styles.tooToughButton}
+                onPress={handleTooTough}
+              >
+                <Text style={styles.tooToughText}>too tough</Text>
+              </Pressable>
+            </View>
+          </View>
+        </>
       )}
-
-      <Pressable 
-        style={styles.tooToughButton}
-        onPress={handleTooTough}
-      >
-        <Text style={styles.tooToughText}>too tough</Text>
-      </Pressable>
     </View>
   );
 
@@ -1440,5 +1507,41 @@ const styles = StyleSheet.create({
   cardPressed: {
     backgroundColor: '#f0f0f0',
     transform: [{ scale: 0.98 }],
+  },
+  actionButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
+    marginTop: 16,
+    paddingHorizontal: 8,
+  },
+  leftActions: {
+    flex: 1,
+    alignItems: 'flex-start',
+  },
+  rightActions: {
+    flex: 1,
+    alignItems: 'flex-end',
+  },
+  undoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 8,
+    borderRadius: 16,
+    backgroundColor: '#f0f0f0',
+    gap: 2,
+  },
+  undoButtonDisabled: {
+    opacity: 0.5,
+  },
+  undoButtonText: {
+    fontSize: 11,
+    color: '#666',
+    textTransform: 'lowercase',
+  },
+  undoButtonTextDisabled: {
+    color: '#ccc',
   },
 });

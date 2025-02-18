@@ -67,13 +67,33 @@ interface BookRating {
   rating: number;
 }
 
+// Update the UserBook interface to match our database schema
+interface DatabaseBook {
+  id: number;
+  title: string;
+  author: string;
+  google_book_id: string;
+}
+
 interface UserBook {
-  user_id: string;  // UUID
-  book_id: number;  // bigint/int8
+  id: number;
+  user_id: string;
+  book_id: number;
   status: 'READ' | 'WANT_TO_READ';
   rating: number | null;
   review: string | null;
   user_sentiment: 'loved' | 'liked' | 'hated' | null;
+  tied_book_ids: number[] | null;
+  created_at: string;
+  updated_at: string;
+  book?: DatabaseBook; // For joined queries
+}
+
+// Add type for comparison book
+interface ComparisonBook {
+  id: number;
+  title: string;
+  author: string;
 }
 
 export default function BookRatingModal({
@@ -226,7 +246,7 @@ export default function BookRatingModal({
   };
 
   const handlePreferComparison = async () => {
-    if (!currentComparisonBook || !remainingComparisons.length) return;
+    if (!currentComparisonBook || !remainingComparisons.length || !user || !sentiment) return;
 
     setComparedBooks(prev => new Set([...prev, currentComparisonBook.id]));
 
@@ -243,7 +263,7 @@ export default function BookRatingModal({
       fullOrderedList: orderedBookRatings.map(b => ({
         id: b.book_id,
         rating: b.rating,
-        title: b.book.title
+        title: b.book?.title ?? 'Unknown'
       }))
     });
 
@@ -264,9 +284,45 @@ export default function BookRatingModal({
         currentIndex,
         existingBookTitle: currentComparisonBook.title
       });
-      await updateAllBookRatings(finalPosition);
-      setShowComparison(false);
-      setShowReview(true);
+
+      try {
+        // First get the book ID
+        const { data: bookData } = await supabase
+          .from('books')
+          .select('id')
+          .eq('google_book_id', book.id)
+          .single();
+
+        if (!bookData) throw new Error('Book not found');
+
+        // Insert the new book first
+        const { error: insertError } = await supabase
+          .from('user_books')
+          .insert({
+            user_id: user.id,
+            book_id: bookData.id,
+            rating: null,
+            user_sentiment: sentiment,
+            status: 'READ',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            tied_book_ids: null
+          });
+
+        if (insertError) throw insertError;
+
+        // Now update all ratings
+        await updateAllBookRatings(finalPosition);
+        setShowComparison(false);
+        setShowReview(true);
+      } catch (error) {
+        console.error('Error in handlePreferComparison:', error);
+        setError('Failed to process book comparison');
+        showToast.error({
+          title: 'Error',
+          message: 'Failed to process book comparison'
+        });
+      }
       return;
     }
 
@@ -278,20 +334,20 @@ export default function BookRatingModal({
       const nextComparisonBook = higherRatedBooks[randomIndex];
       
       console.log('Moving to next comparison:', {
-        nextBook: nextComparisonBook.book.title,
+        nextBook: nextComparisonBook.book?.title ?? 'Unknown',
         remainingOptions: higherRatedBooks.length
       });
       
       setCurrentComparisonBook({
         id: nextComparisonBook.book_id,
-        title: nextComparisonBook.book.title,
-        author: nextComparisonBook.book.author
+        title: nextComparisonBook.book?.title ?? 'Unknown',
+        author: nextComparisonBook.book?.author ?? 'Unknown'
       });
     }
   };
 
   const handlePreferCurrent = async () => {
-    if (!currentComparisonBook || !remainingComparisons.length) return;
+    if (!currentComparisonBook || !remainingComparisons.length || !user || !sentiment) return;
 
     setComparedBooks(prev => new Set([...prev, currentComparisonBook.id]));
 
@@ -307,8 +363,8 @@ export default function BookRatingModal({
       existingBookRating: orderedBookRatings[currentIndex]?.rating,
       fullOrderedList: orderedBookRatings.map(b => ({
         id: b.book_id,
-        rating: b.rating,
-        title: b.book.title
+        rating: b.rating ?? null,
+        title: b.book?.title ?? 'Unknown'
       }))
     });
 
@@ -325,9 +381,45 @@ export default function BookRatingModal({
         currentIndex,
         existingBookTitle: currentComparisonBook.title
       });
-      await updateAllBookRatings(finalPosition);
-      setShowComparison(false);
-      setShowReview(true);
+
+      try {
+        // First get the book ID
+        const { data: bookData } = await supabase
+          .from('books')
+          .select('id')
+          .eq('google_book_id', book.id)
+          .single();
+
+        if (!bookData) throw new Error('Book not found');
+
+        // Insert the new book first
+        const { error: insertError } = await supabase
+          .from('user_books')
+          .insert({
+            user_id: user.id,
+            book_id: bookData.id,
+            rating: null,
+            user_sentiment: sentiment,
+            status: 'READ',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+            tied_book_ids: null
+          });
+
+        if (insertError) throw insertError;
+
+        // Now update all ratings
+        await updateAllBookRatings(finalPosition);
+        setShowComparison(false);
+        setShowReview(true);
+      } catch (error) {
+        console.error('Error in handlePreferCurrent:', error);
+        setError('Failed to process book comparison');
+        showToast.error({
+          title: 'Error',
+          message: 'Failed to process book comparison'
+        });
+      }
     } else {
       // Update remaining comparisons to only include lower rated books
       setRemainingComparisons(lowerRatedBooks);
@@ -337,64 +429,153 @@ export default function BookRatingModal({
       const nextComparisonBook = lowerRatedBooks[randomIndex];
       
       console.log('Moving to next comparison:', {
-        nextBook: nextComparisonBook.book.title,
+        nextBook: nextComparisonBook.book?.title ?? 'Unknown',
         remainingOptions: lowerRatedBooks.length
       });
       
       setCurrentComparisonBook({
         id: nextComparisonBook.book_id,
-        title: nextComparisonBook.book.title,
-        author: nextComparisonBook.book.author
+        title: nextComparisonBook.book?.title ?? 'Unknown',
+        author: nextComparisonBook.book?.author ?? 'Unknown'
       });
     }
   };
 
   const handleTooTough = async () => {
-    if (!currentComparisonBook || !sentiment || !user) return;
-
-    const tiedRating = calculateTiedRating();
-    if (!tiedRating) return;
+    if (!currentComparisonBook || !sentiment || !user) {
+      console.error('Missing required data for handleTooTough:', {
+        currentComparisonBook,
+        sentiment,
+        user
+      });
+      return;
+    }
 
     try {
-      const bookId = await ensureBookExists(book);
-      
-      // First create the new book entry
-      const { error: insertError } = await supabase
-        .from("user_books")
-        .insert({
-          user_id: user.id,
-          book_id: bookId,
-          rating: tiedRating,
-          status: "READ",
-          user_sentiment: sentiment,
-          tied_book_ids: [currentComparisonBook.book_id]
-        });
-
-      if (insertError) throw insertError;
-
-      // Update the comparison book to be tied with the new book
-      const { error: tieError } = await supabase
-        .from("user_books")
-        .update({
-          tied_book_ids: [...(currentComparisonBook.tied_book_ids || []), bookId]
-        })
-        .eq("book_id", currentComparisonBook.book_id)
-        .eq("user_id", user.id);
-
-
-      if (tieError) throw tieError;
-
-      showToast.success({
-        title: "Books tied",
-        message: "These books will maintain the same rating"
+      console.log('Starting handleTooTough process:', {
+        newBook: book.volumeInfo.title,
+        existingBook: currentComparisonBook.title,
+        sentiment
       });
 
+      // Get the book ID from the database first
+      const { data: bookData, error: bookError } = await supabase
+        .from('books')
+        .select('id')
+        .eq('google_book_id', book.id)
+        .single();
+
+      if (bookError || !bookData) {
+        console.error('Error getting book data:', bookError);
+        throw new Error('Failed to get book data');
+      }
+
+      // Get the comparison book's current data
+      const { data: comparisonBookData, error: comparisonError } = await supabase
+        .from('user_books')
+        .select('*, book:books(*)')
+        .eq('book_id', currentComparisonBook.id)
+        .eq('user_id', user.id)
+        .single();
+
+      if (comparisonError || !comparisonBookData) {
+        console.error('Error getting comparison book data:', comparisonError);
+        throw new Error('Failed to get comparison book data');
+      }
+
+      console.log('Retrieved comparison book data:', {
+        id: comparisonBookData.id,
+        bookId: comparisonBookData.book_id,
+        rating: comparisonBookData.rating,
+        existingTiedBookIds: comparisonBookData.tied_book_ids,
+        title: comparisonBookData.book?.title
+      });
+
+      // First insert the new book with null tied_book_ids
+      console.log('Inserting new book with data:', {
+        userId: user.id,
+        bookId: bookData.id,
+        rating: comparisonBookData.rating,
+        tiedBookIds: null 
+      });
+
+      const { data: newUserBook, error: insertError } = await supabase
+        .from('user_books')
+        .insert({
+          user_id: user.id,
+          book_id: bookData.id,
+          rating: comparisonBookData.rating,
+          user_sentiment: sentiment,
+          status: 'READ',
+          review: null,
+          tied_book_ids: null, // Start with null
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (insertError || !newUserBook) {
+        console.error('Error inserting new book:', insertError);
+        throw insertError;
+      }
+
+      console.log('Successfully inserted new book:', {
+        id: newUserBook.id,
+        bookId: newUserBook.book_id,
+        rating: newUserBook.rating,
+        tiedBookIds: newUserBook.tied_book_ids
+      });
+
+      // Now update only the comparison book and let the trigger handle the reciprocal relationship
+      console.log('Updating comparison book to trigger reciprocal relationship:', {
+        bookId: currentComparisonBook.id,
+        currentTiedIds: comparisonBookData.tied_book_ids,
+        addingTiedBookId: bookData.id
+      });
+
+      const { data: updatedComparison, error: updateError } = await supabase
+        .from('user_books')
+        .update({
+          tied_book_ids: [bookData.id], // Set as array with the new book's ID
+          updated_at: new Date().toISOString()
+        })
+        .eq('book_id', currentComparisonBook.id)
+        .eq('user_id', user.id)
+        .select();
+
+      if (updateError) {
+        console.error('Error updating comparison book:', {
+          error: updateError,
+          attemptedUpdate: {
+            bookId: currentComparisonBook.id,
+            tiedBookIds: [bookData.id]
+          }
+        });
+        throw updateError;
+      }
+
+      console.log('Successfully updated comparison book:', {
+        result: updatedComparison
+      });
+
+      // Find the current index of the comparison book
+      const currentIndex = orderedBookRatings.findIndex(
+        b => b.book_id === currentComparisonBook.id
+      );
+
+      // Call updateAllBookRatings with the same position as the comparison book
+      await updateAllBookRatings(currentIndex);
+
+      setShowComparison(false);
       setShowReview(true);
+
     } catch (error) {
-      console.error("Error handling tied books:", error);
+      console.error('Error in handleTooTough:', error);
+      setError('Failed to process book comparison');
       showToast.error({
-        title: "Error",
-        message: "Failed to tie books. Please try again."
+        title: 'Error',
+        message: 'Failed to process book comparison'
       });
     }
   };
@@ -430,13 +611,18 @@ export default function BookRatingModal({
   };
 
   const handleSkip = () => {
+    if (!currentComparisonBook) return;
+    
     const newBook = getRandomBook(
-      orderedBookRatings.filter((b) => b.id !== currentComparisonBook?.id),
+      orderedBookRatings.filter((b) => b.book_id !== currentComparisonBook.id)
     );
     setCurrentComparisonBook(newBook);
   };
 
-  const calculateRatings = (sentiment: 'loved' | 'liked' | 'hated', orderedBooks: any[]): (number | null)[] => {
+  const calculateRatings = (
+    sentiment: 'loved' | 'liked' | 'hated', 
+    orderedBooks: { book_id: number }[]
+  ): number[] => {
     const ranges = {
       loved: { min: 7.1, max: 10.0 },
       liked: { min: 5.1, max: 7.0 },
@@ -447,18 +633,15 @@ export default function BookRatingModal({
     const totalBooks = orderedBooks.length;
     
     if (totalBooks === 1) {
-      // First book in category gets null rating
-      return [null];
+      // First book gets the maximum rating for its sentiment
+      return [range.max];
     }
 
     // Calculate interval between ratings
     const interval = (range.max - range.min) / (totalBooks - 1);
     
     // Return array of ratings, starting from highest to lowest
-    // orderedBooks should be in descending order (best to worst)
     return orderedBooks.map((_, index) => {
-      // Calculate rating: max - (interval * index)
-      // This gives highest rating to first book, lowest to last
       const rating = Number((range.max - (interval * index)).toFixed(1));
       return rating;
     });
@@ -506,7 +689,6 @@ export default function BookRatingModal({
             status: 'READ',
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
-            tied_with_books: null,
             tied_book_ids: null
           });
 
@@ -637,94 +819,123 @@ export default function BookRatingModal({
     }
   };
 
-  // Add this function to update all book ratings
+  // Update updateAllBookRatings to handle tied books
   const updateAllBookRatings = async (newBookPosition: number) => {
     try {
+      console.log('Starting updateAllBookRatings:', {
+        newBookPosition,
+        newBook: book.volumeInfo.title
+      });
+
       // Get the book ID from the database first
-      const { data: bookData } = await supabase
+      const { data: bookData, error: bookError } = await supabase
         .from('books')
         .select('id')
         .eq('google_book_id', book.id)
         .single();
 
-      if (!bookData) {
-        throw new Error('Book not found in database');
+      if (bookError || !bookData) {
+        console.error('Error getting book data:', bookError);
+        throw new Error('Failed to get book data');
       }
 
-      // Get all books in this sentiment category
-      const { data: existingBooks } = await supabase
+      // Get all books in this sentiment category with their tied books
+      const { data: existingBooks, error: booksError } = await supabase
         .from('user_books')
-        .select('*')
+        .select('*, tied_book_ids')
         .eq('user_id', user.id)
         .eq('user_sentiment', sentiment)
         .order('rating', { ascending: false });
 
-      if (!existingBooks) {
+      if (booksError || !existingBooks) {
+        console.error('Error fetching existing books:', booksError);
         throw new Error('Failed to fetch existing books');
       }
 
-      console.log('Current books in category:', existingBooks.map(b => ({
+      // Filter out the new book from existing books if it's already there
+      const filteredExistingBooks = existingBooks.filter(b => b.book_id !== bookData.id);
+
+      console.log('Current books in category:', filteredExistingBooks.map(b => ({
         id: b.book_id,
-        rating: b.rating
+        rating: b.rating,
+        tiedWith: b.tied_book_ids
       })));
 
+      // Create a map of tied books for quick lookup
+      const tiedBooksMap = new Map<number, number[]>();
+      filteredExistingBooks.forEach(book => {
+        if (book.tied_book_ids && book.tied_book_ids.length > 0) {
+          tiedBooksMap.set(book.book_id, book.tied_book_ids);
+        }
+      });
+
       // Create new ordered list with the new book in the correct position
-      // Note: newBookPosition represents where the new book should go in the rating order
-      // If newBookPosition is 1, it should go between the first and second book
       const updatedOrderedBooks = [
-        ...existingBooks.slice(0, newBookPosition),
-        { book_id: bookData.id }, // New book
-        ...existingBooks.slice(newBookPosition)
+        ...filteredExistingBooks.slice(0, newBookPosition),
+        { book_id: bookData.id },
+        ...filteredExistingBooks.slice(newBookPosition)
       ];
 
       console.log('New book order:', {
         position: newBookPosition,
-        order: updatedOrderedBooks.map(b => b.book_id),
-        explanation: `Inserting book ${bookData.id} at position ${newBookPosition}`
+        order: updatedOrderedBooks.map(b => b.book_id)
       });
 
       // Calculate new ratings for all books
       const newRatings = calculateRatings(sentiment!, updatedOrderedBooks);
 
-      console.log('New ratings calculated:', newRatings.map((rating, index) => ({
+      console.log('Initial ratings calculated:', newRatings.map((rating, index) => ({
         bookId: updatedOrderedBooks[index].book_id,
-        rating
+        rating,
+        position: index
       })));
 
-      // First insert the new book with its calculated rating
-      const { error: insertError } = await supabase
-        .from('user_books')
-        .insert({
-          user_id: user.id,
-          book_id: bookData.id,
-          rating: newRatings[newBookPosition], // Use newBookPosition to get correct rating
-          user_sentiment: sentiment,
-          status: 'READ',
-          review: null,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          tied_with_books: null,
-          tied_book_ids: null
-        });
+      // Adjust ratings for tied books
+      const adjustedRatings = new Map<number, number>();
+      updatedOrderedBooks.forEach((book, index) => {
+        const tiedBooks = tiedBooksMap.get(book.book_id);
+        if (tiedBooks) {
+          // Use the highest rating among tied books
+          const tiedRatings = [newRatings[index]];
+          tiedBooks.forEach(tiedBookId => {
+            const tiedIndex = updatedOrderedBooks.findIndex(b => b.book_id === tiedBookId);
+            if (tiedIndex !== -1) {
+              tiedRatings.push(newRatings[tiedIndex]);
+            }
+          });
+          const highestRating = Math.max(...tiedRatings);
+          
+          // Set the same rating for all tied books
+          adjustedRatings.set(book.book_id, highestRating);
+          tiedBooks.forEach(tiedBookId => {
+            adjustedRatings.set(tiedBookId, highestRating);
+          });
+        } else if (!adjustedRatings.has(book.book_id)) {
+          adjustedRatings.set(book.book_id, newRatings[index]);
+        }
+      });
 
-      if (insertError) throw insertError;
-
-      // Then update all existing books with their new ratings
-      await Promise.all(
-        existingBooks.map((book, index) => {
-          // If the book's position is after or at the insertion point,
-          // its new rating is one position later in the newRatings array
-          const newIndex = index >= newBookPosition ? index + 1 : index;
-          return supabase
-            .from('user_books')
-            .update({
-              rating: newRatings[newIndex],
-              updated_at: new Date().toISOString()
-            })
-            .eq('book_id', book.book_id)
-            .eq('user_id', user.id);
-        })
+      console.log('Adjusted ratings for tied books:', 
+        Array.from(adjustedRatings.entries()).map(([bookId, rating]) => ({
+          bookId,
+          rating,
+          tiedWith: tiedBooksMap.get(bookId)
+        }))
       );
+
+      // Update all books with their new ratings
+      const updatePromises = Array.from(adjustedRatings.entries()).map(
+        ([bookId, rating]) => supabase
+          .from('user_books')
+          .update({
+            rating,
+            updated_at: new Date().toISOString()
+          })
+          .eq('book_id', bookId)
+          .eq('user_id', user.id)
+      );
+
+      await Promise.all(updatePromises);
 
       console.log('Successfully updated all book ratings');
     } catch (error) {

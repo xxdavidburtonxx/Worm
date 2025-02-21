@@ -31,6 +31,8 @@ export default function EditProfileScreen() {
   const { supabase } = useSupabase();
   const { user } = useAuth();
   const [isLoading, setIsLoading] = useState(false);
+  const [usernameError, setUsernameError] = useState<string>('');
+  const [originalUsername, setOriginalUsername] = useState<string>('');
   const [formData, setFormData] = useState<ProfileFormData>({
     username: '',
     name: '',
@@ -60,6 +62,7 @@ export default function EditProfileScreen() {
         bio: data.bio || '',
         avatar_url: data.avatar_url,
       });
+      setOriginalUsername(data.username || '');
     } catch (error) {
       console.error('Error fetching profile:', error);
       showToast.error({
@@ -67,6 +70,52 @@ export default function EditProfileScreen() {
         message: 'Failed to load profile data',
       });
     }
+  };
+
+  const checkUsernameAvailability = async (username: string) => {
+    // If username hasn't changed, no need to check
+    if (username === originalUsername) {
+      setUsernameError('');
+      return true;
+    }
+
+    try {
+      // Check if username is valid format
+      if (!/^[a-zA-Z0-9_]{3,20}$/.test(username)) {
+        setUsernameError('Username must be 3-20 characters and can only contain letters, numbers, and underscores');
+        return false;
+      }
+
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('username')
+        .eq('username', username)
+        .neq('id', user?.id)
+        .single();
+
+      if (error && error.code === 'PGRST116') {
+        // Error code PGRST116 means no rows returned, which is good
+        setUsernameError('');
+        return true;
+      }
+
+      if (data) {
+        setUsernameError('Username is already taken');
+        return false;
+      }
+
+      setUsernameError('');
+      return true;
+    } catch (error) {
+      console.error('Error checking username:', error);
+      setUsernameError('Error checking username availability');
+      return false;
+    }
+  };
+
+  const handleUsernameChange = async (text: string) => {
+    setFormData(prev => ({ ...prev, username: text }));
+    await checkUsernameAvailability(text);
   };
 
   const handleImagePick = async () => {
@@ -110,14 +159,33 @@ export default function EditProfileScreen() {
   const handleSubmit = async () => {
     if (!user) return;
 
+    // Validate required fields
+    if (!formData.username.trim()) {
+      showToast.error({
+        title: 'Error',
+        message: 'Username is required'
+      });
+      return;
+    }
+
+    // Check username availability one last time before submitting
+    const isUsernameAvailable = await checkUsernameAvailability(formData.username);
+    if (!isUsernameAvailable) {
+      showToast.error({
+        title: 'Error',
+        message: usernameError || 'Username is not available'
+      });
+      return;
+    }
+
     setIsLoading(true);
     try {
       const { error } = await supabase
         .from('profiles')
         .update({
-          username: formData.username,
-          name: formData.name,
-          bio: formData.bio,
+          username: formData.username.trim(),
+          name: formData.name.trim(),
+          bio: formData.bio.trim(),
           avatar_url: formData.avatar_url,
           updated_at: new Date().toISOString(),
         })
@@ -129,7 +197,13 @@ export default function EditProfileScreen() {
         title: 'Success',
         message: 'Profile updated successfully',
       });
-      router.back();
+      
+      // Navigate back with a refresh parameter
+      router.back({
+        params: {
+          refresh: Date.now()
+        }
+      });
     } catch (error) {
       console.error('Error updating profile:', error);
       showToast.error({
@@ -175,12 +249,16 @@ export default function EditProfileScreen() {
               <TextInput
                 label="Username"
                 value={formData.username}
-                onChangeText={(text) => setFormData(prev => ({ ...prev, username: text }))}
+                onChangeText={handleUsernameChange}
                 style={styles.input}
                 mode="outlined"
                 outlineColor={colors.warmBrown}
                 activeOutlineColor={colors.siennaBrown}
+                error={!!usernameError}
               />
+              {usernameError ? (
+                <Text style={styles.errorText}>{usernameError}</Text>
+              ) : null}
 
               <TextInput
                 label="Display Name"
@@ -210,7 +288,7 @@ export default function EditProfileScreen() {
               mode="contained"
               onPress={handleSubmit}
               loading={isLoading}
-              disabled={isLoading}
+              disabled={isLoading || !!usernameError}
               style={styles.submitButton}
               contentStyle={styles.submitButtonContent}
             >
@@ -253,6 +331,12 @@ const styles = StyleSheet.create({
   },
   input: {
     backgroundColor: '#fff',
+  },
+  errorText: {
+    color: '#B00020',
+    fontSize: 12,
+    marginTop: -12,
+    marginLeft: 8,
   },
   submitButton: {
     marginTop: 24,

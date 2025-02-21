@@ -29,6 +29,7 @@
         <category android:name="android.intent.category.BROWSABLE"/>
         <data android:scheme="worm"/>
         <data android:scheme="com.worm.app"/>
+        <data android:scheme="exp+worm"/>
       </intent-filter>
     </activity>
   </application>

@@ -61,6 +61,9 @@ export default {
       "googleBooksApiKey": process.env.EXPO_PUBLIC_GOOGLE_PUBLIC_API,
       "supabaseUrl": process.env.EXPO_PUBLIC_SUPABASE_URL,
       "supabaseAnonKey": process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY,
+      "eas": {
+        "projectId": "13b0366f-4ecd-4060-9a4b-672cde2571b9"
+      }
     }
   }
 };

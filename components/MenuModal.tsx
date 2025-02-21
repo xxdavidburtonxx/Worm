@@ -34,6 +34,7 @@ const MENU_ROUTES = {
   PRIVACY: '/privacy' as RelativePathString,
   SETTINGS: '/settings' as RelativePathString,
   AUTH: '/auth' as RelativePathString,
+  GOAL: '/goal' as RelativePathString,
 } as const;
 
 const MenuItem = ({ icon, text, onPress }: MenuItemProps) => (
@@ -119,6 +120,11 @@ export default function MenuModal({ visible, onClose }: MenuModalProps) {
             contentContainerStyle={{ paddingBottom: 50 }}
             showsVerticalScrollIndicator={false}
           >
+            <MenuItem 
+              icon="trophy" 
+              text="2025 Reading Goal" 
+              onPress={() => handleNavigation(MENU_ROUTES.GOAL)}
+            />
             <MenuItem 
               icon="cloud-upload" 
               text="Import Existing List" 

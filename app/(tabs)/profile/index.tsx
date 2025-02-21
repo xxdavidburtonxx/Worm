@@ -2,10 +2,11 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import React, { useState, useEffect } from 'react';
 import { ScrollView, StyleSheet, View, Share, ActivityIndicator, Pressable } from 'react-native';
-import { Avatar, Button, IconButton, Surface, Text } from 'react-native-paper';
+import { Avatar, Button, IconButton, Surface, Text, ProgressBar } from 'react-native-paper';
 import * as ImagePicker from 'expo-image-picker';
 import { decode } from 'base64-arraybuffer';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useFocusEffect } from '@react-navigation/native';
 
 import MenuModal from '@/components/MenuModal';
 import { useSupabase } from '@/hooks/useSupabase';
@@ -35,9 +36,22 @@ export default function ProfileScreen() {
   const [stats, setStats] = useState({
     followers: 0,
     booksRead: 0,
-    ranking: 0,
+    ranking: '-' as number | string,
     booksToRead: 0
   });
+
+  // Add state for user's goal
+  const [userGoal, setUserGoal] = useState<number | null>(null);
+  const [goalProgress, setGoalProgress] = useState(0);
+
+  // Replace router.addListener with useFocusEffect
+  useFocusEffect(
+    React.useCallback(() => {
+      if (user) {
+        fetchProfile();
+      }
+    }, [user])
+  );
 
   useEffect(() => {
     let isMounted = true;
@@ -196,7 +210,7 @@ export default function ProfileScreen() {
       setStats({
         followers: followersCount || 0,
         booksRead: booksReadCount || 0,
-        ranking: userRanking || 0,
+        ranking: booksReadCount ? userRanking : '-',
         booksToRead: booksToReadCount || 0
       });
     } catch (error) {
@@ -291,6 +305,111 @@ export default function ProfileScreen() {
     router.push('/profile/edit');
   };
 
+  const handleGoalSelect = async (goal: string) => {
+    if (!user) return;
+
+    try {
+      const { error } = await supabase
+        .from('profiles')
+        .update({ goals: parseInt(goal) })
+        .eq('id', user.id);
+
+      if (error) throw error;
+
+      showToast.success({
+        title: "Success",
+        message: `Reading goal set to ${goal} books`
+      });
+      
+      router.push('/goal');
+    } catch (error) {
+      console.error('Error setting goal:', error);
+      showToast.error({
+        title: "Error",
+        message: "Failed to set reading goal"
+      });
+    }
+  };
+
+  // Fetch user's goal and progress
+  useEffect(() => {
+    const fetchGoalData = async () => {
+      if (!user) return;
+
+      try {
+        // Fetch user's goal
+        const { data: profileData, error: profileError } = await supabase
+          .from('profiles')
+          .select('goals')
+          .eq('id', user.id)
+          .single();
+
+        if (profileError) throw profileError;
+
+        // Fetch books read count for progress
+        const { count: booksReadCount, error: booksError } = await supabase
+          .from('user_books')
+          .select('count', { count: 'exact' })
+          .eq('user_id', user.id)
+          .eq('status', 'READ');
+
+        if (booksError) throw booksError;
+
+        setUserGoal(profileData.goals);
+        setGoalProgress(booksReadCount || 0);
+      } catch (error) {
+        console.error('Error fetching goal data:', error);
+      }
+    };
+
+    fetchGoalData();
+  }, [user]);
+
+  const renderGoalCard = () => {
+    if (!userGoal) {
+      // Show goal setter view
+      return (
+        <Surface style={[styles.infoCard, styles.goalCard]}>
+          <View style={styles.cardIconContainer}>
+            <MaterialCommunityIcons name="trophy" size={24} color={colors.siennaBrown} />
+          </View>
+          <Text style={styles.cardTitle}>Set your 2025 goal</Text>
+          <Text style={styles.goalSubtitle}>How many books do you want to read in 2025?</Text>
+          <View style={styles.goalOptions}>
+            {['10', '20', '40'].map((option) => (
+              <Button 
+                key={option}
+                mode="outlined" 
+                style={styles.goalButton}
+                labelStyle={styles.goalButtonLabel}
+                onPress={() => handleGoalSelect(option)}
+              >
+                {option}
+              </Button>
+            ))}
+          </View>
+        </Surface>
+      );
+    }
+
+    // Show progress view
+    const progress = userGoal > 0 ? goalProgress / userGoal : 0;
+    const remainingBooks = Math.max(0, userGoal - goalProgress);
+
+    return (
+      <Pressable onPress={() => router.push('/goal')}>
+        <Surface style={[styles.infoCard, styles.goalCard]}>
+          <View style={styles.cardIconContainer}>
+            <MaterialCommunityIcons name="trophy" size={24} color={colors.siennaBrown} />
+          </View>
+          <Text style={styles.cardTitle}>2025 Reading Goal</Text>
+          <Text style={styles.cardValue}>{userGoal} books</Text>
+          <Text style={styles.goalStatText}>{goalProgress} read • {remainingBooks} to go</Text>
+        </Surface>
+      </Pressable>
+    );
+  };
+
   if (!user) {
     return <AuthGuard message="Sign in to view your profile" />;
   }
@@ -368,10 +487,20 @@ export default function ProfileScreen() {
 
       {/* Stats */}
       <View style={styles.statsContainer}>
-        <View style={styles.stat}>
+        <Pressable 
+          style={styles.stat}
+          onPress={() => {
+            console.log('Attempting to navigate to followers:', {
+              route: '/followers',
+              userId: user.id,
+              timestamp: new Date().toISOString()
+            });
+            router.push('/followers');
+          }}
+        >
           <Text style={styles.statNumber}>{stats.followers}</Text>
-          <Text style={styles.statLabel}>Followers</Text>
-        </View>
+          <Text style={[styles.statLabel, styles.clickableLabel]}>Followers</Text>
+        </Pressable>
         <View style={styles.stat}>
           <Text style={styles.statNumber}>{stats.booksRead}</Text>
           <Text style={styles.statLabel}>Books Read</Text>
@@ -448,25 +577,7 @@ export default function ProfileScreen() {
           </Surface>
         </Pressable>
 
-        <Surface style={[styles.infoCard, styles.goalCard]}>
-          <View style={styles.goalHeader}>
-            <Text style={styles.goalTitle}>Set your 2025 goal</Text>
-            <MaterialCommunityIcons name="trophy" size={28} color={colors.goldenSand} />
-          </View>
-          <Text style={styles.goalSubtitle}>How many books do you want to read in 2025?</Text>
-          <View style={styles.goalOptions}>
-            {['10', '20', '40'].map((option) => (
-              <Button 
-                key={option}
-                mode="outlined" 
-                style={styles.goalButton}
-                labelStyle={styles.goalButtonLabel}
-              >
-                {option}
-              </Button>
-            ))}
-          </View>
-        </Surface>
+        {renderGoalCard()}
       </View>
 
       {/* Menu Modal */}
@@ -656,28 +767,20 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     flexShrink: 1,
     padding: 16,
-  },
-  goalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-  },
-  goalTitle: {
-    fontSize: 16,
-    fontWeight: 'bold',
-    color: colors.siennaBrown,
   },
   goalSubtitle: {
     color: colors.warmBrown,
     marginTop: 8,
+    marginBottom: 12,
     fontSize: 13,
+    textAlign: 'center',
   },
   goalOptions: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 12,
-    marginHorizontal: 20,
-    gap: 20,
+    width: '100%',
+    gap: 8,
   },
   goalButton: {
     flex: 1,
@@ -687,6 +790,11 @@ const styles = StyleSheet.create({
   goalButtonLabel: {
     fontSize: 14,
     color: colors.siennaBrown,
+  },
+  goalStatText: {
+    fontSize: 13,
+    color: colors.warmBrown,
+    marginTop: 4,
   },
   loadingContainer: {
     justifyContent: 'center',

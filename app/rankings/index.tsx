@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { View, StyleSheet, FlatList, ActivityIndicator } from 'react-native';
-import { Text, Avatar, Surface } from 'react-native-paper';
+import { View, StyleSheet, FlatList, ActivityIndicator, Pressable } from 'react-native';
+import { Text, Avatar, Surface, IconButton } from 'react-native-paper';
 import { useRouter } from 'expo-router';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 import { useSupabase } from '@/hooks/useSupabase';
 import { useAuth } from '@/hooks/useAuth';
@@ -113,11 +114,21 @@ export default function RankingsScreen() {
 
   return (
     <View style={styles.container}>
+      <View style={styles.header}>
+        <IconButton
+          icon="arrow-left"
+          size={24}
+          onPress={() => router.back()}
+          style={styles.backButton}
+        />
+        <Text style={styles.headerTitle}>Rankings</Text>
+      </View>
       <FlatList
         data={rankings}
         renderItem={renderItem}
         keyExtractor={item => item.user_id}
         contentContainerStyle={styles.listContent}
+        showsVerticalScrollIndicator={false}
       />
     </View>
   );
@@ -126,29 +137,57 @@ export default function RankingsScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#F2EBD4', // lightKhaki from color scheme
+  },
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingTop: 60,
+    paddingBottom: 20,
+    paddingHorizontal: 16,
+    backgroundColor: '#F2EBD4',
+  },
+  headerTitle: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#9A634E', // siennaBrown from color scheme
+    marginLeft: 8,
+  },
+  backButton: {
+    margin: 0,
   },
   loadingContainer: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
+    backgroundColor: '#F2EBD4',
   },
   listContent: {
     padding: 16,
+    paddingTop: 8,
   },
   rankingItem: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 16,
-    marginBottom: 8,
-    borderRadius: 8,
+    marginBottom: 12,
+    borderRadius: 12,
     elevation: 2,
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: 0,
+      height: 2,
+    },
+    shadowOpacity: 0.1,
+    shadowRadius: 3.84,
   },
   rank: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: 'bold',
     marginRight: 16,
     minWidth: 40,
+    color: '#A27C62', // warmBrown from color scheme
   },
   avatar: {
     marginRight: 16,
@@ -159,10 +198,11 @@ const styles = StyleSheet.create({
   username: {
     fontSize: 16,
     fontWeight: '600',
+    color: '#9A634E', // siennaBrown from color scheme
   },
   booksRead: {
     fontSize: 14,
-    color: '#666',
+    color: '#A27C62', // warmBrown from color scheme
     marginTop: 4,
   },
 }); 

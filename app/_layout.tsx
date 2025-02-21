@@ -22,7 +22,7 @@ import { useAuth, AuthProvider } from "@/hooks/useAuth";
 import { useColorScheme } from "@/hooks/useColorScheme";
 
 // Constants
-const PROTECTED_SEGMENTS = ["(tabs)", "book", "profile", "rankings"];
+const PROTECTED_SEGMENTS = ["(tabs)", "book", "profile", "rankings", "goal", "followers"];
 
 // Add these types
 import type { RelativePathString } from "expo-router";
@@ -37,12 +37,12 @@ function AuthGuard() {
   const { user, isLoading } = useAuth();
 
   useEffect(() => {
-    console.log('AuthGuard effect triggered:', {
-      isLoading,
-      user: user?.id,
+    console.log('Available routes:', {
       segments,
+      protectedSegments: PROTECTED_SEGMENTS,
       currentSegment: segments[0],
-      timestamp: new Date().toISOString()
+      fullPath: segments.join('/'),
+      isProtected: PROTECTED_SEGMENTS.includes(segments[0])
     });
 
     if (isLoading) {
@@ -59,7 +59,9 @@ function AuthGuard() {
       segments,
       isAuthenticated: !!user,
       protectedSegments: PROTECTED_SEGMENTS,
-      matchedSegment: segments[0]
+      matchedSegment: segments[0],
+      fullPath: segments.join('/'),
+      isFollowersRoute: segments[0] === 'followers'
     });
 
     if (!user && inProtectedRoute) {
@@ -142,6 +144,22 @@ export default function RootLayout() {
                 presentation: 'card',
                 headerShown: true,
                 title: 'Worm Rankings',
+              }} 
+            />
+            <Stack.Screen 
+              name="goal" 
+              options={{
+                presentation: 'card',
+                headerShown: false,
+                animation: 'slide_from_right',
+              }} 
+            />
+            <Stack.Screen 
+              name="followers" 
+              options={{
+                presentation: 'card',
+                headerShown: true,
+                title: 'Followers',
               }} 
             />
             <Stack.Screen 

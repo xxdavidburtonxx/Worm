@@ -1,5 +1,5 @@
 // External packages
-import { useRouter } from "expo-router";
+import { useRouter, useLocalSearchParams } from "expo-router";
 import { Star, Search, Grid, List, ChevronDown } from "lucide-react-native";
 import React, { useState, useCallback } from "react";
 import {
@@ -46,6 +46,7 @@ export default function BookshelfScreen() {
   const router = useRouter();
   const { supabase } = useSupabase();
   const { user } = useAuth();
+  const { section } = useLocalSearchParams<{ section: BookshelfSection }>();
 
   if (!user) {
     return <AuthGuard message="Sign in to view your bookshelf" />;
@@ -68,6 +69,13 @@ export default function BookshelfScreen() {
   const filterHeight = React.useRef(new Animated.Value(0)).current;
   const filterOpacity = React.useRef(new Animated.Value(0)).current;
   const viewTransition = React.useRef(new Animated.Value(0)).current;
+
+  // Add this effect to update activeSection when section param changes
+  React.useEffect(() => {
+    if (section) {
+      setActiveSection(section);
+    }
+  }, [section]);
 
   const fetchCategories = async () => {
     try {

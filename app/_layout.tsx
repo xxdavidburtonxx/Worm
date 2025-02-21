@@ -22,7 +22,7 @@ import { useAuth, AuthProvider } from "@/hooks/useAuth";
 import { useColorScheme } from "@/hooks/useColorScheme";
 
 // Constants
-const PROTECTED_SEGMENTS = ["(tabs)", "book", "profile"];
+const PROTECTED_SEGMENTS = ["(tabs)", "book", "profile", "rankings"];
 
 // Add these types
 import type { RelativePathString } from "expo-router";
@@ -37,18 +37,44 @@ function AuthGuard() {
   const { user, isLoading } = useAuth();
 
   useEffect(() => {
-    if (isLoading) return;
+    console.log('AuthGuard effect triggered:', {
+      isLoading,
+      user: user?.id,
+      segments,
+      currentSegment: segments[0],
+      timestamp: new Date().toISOString()
+    });
+
+    if (isLoading) {
+      console.log('Auth is still loading, waiting...');
+      return;
+    }
 
     const inProtectedRoute = PROTECTED_SEGMENTS.some(
       (segment) => segments[0] === segment,
     );
 
+    console.log('Route protection check:', {
+      inProtectedRoute,
+      segments,
+      isAuthenticated: !!user,
+      protectedSegments: PROTECTED_SEGMENTS,
+      matchedSegment: segments[0]
+    });
+
     if (!user && inProtectedRoute) {
+      console.log('Unauthorized access, redirecting to auth');
       router.replace(AUTH_ROUTE);
     } else if (user && !inProtectedRoute) {
+      console.log('Authenticated user in public route, redirecting to tabs');
       router.replace("/(tabs)");
     }
   }, [user, segments, isLoading]);
+
+  // Don't render anything during the initial loading
+  if (isLoading) {
+    return null;
+  }
 
   return <Stack />;
 }
@@ -108,6 +134,32 @@ export default function RootLayout() {
                 presentation: 'modal',
                 title: 'Comments',
                 headerShown: true,
+              }} 
+            />
+            <Stack.Screen 
+              name="rankings" 
+              options={{
+                presentation: 'card',
+                headerShown: true,
+                title: 'Worm Rankings',
+              }} 
+            />
+            <Stack.Screen 
+              name="profile/[id]" 
+              options={{
+                presentation: 'card',
+                headerShown: true,
+                title: 'Profile',
+                animation: 'slide_from_right',
+                headerBackTitle: 'Back',
+              }} 
+            />
+            <Stack.Screen 
+              name="profile/edit" 
+              options={{
+                presentation: 'modal',
+                headerShown: true,
+                title: 'Edit Profile',
               }} 
             />
           </Stack>

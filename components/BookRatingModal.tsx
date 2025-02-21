@@ -4,6 +4,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  X,
 } from "lucide-react-native";
 import React, { useState, useEffect } from "react";
 import {
@@ -1004,6 +1005,32 @@ export default function BookRatingModal({
     setComparisonHistory(prev => prev.slice(0, -1));
   };
 
+  const handleExit = async () => {
+    // If we're in the review view, we need to clean up the entry
+    if (showReview) {
+      try {
+        // Get the book ID from the database
+        const { data: bookData } = await supabase
+          .from('books')
+          .select('id')
+          .eq('google_book_id', book.id)
+          .single();
+
+        if (bookData) {
+          // Delete the user_books entry
+          await supabase
+            .from('user_books')
+            .delete()
+            .eq('book_id', bookData.id)
+            .eq('user_id', user?.id);
+        }
+      } catch (error) {
+        console.error('Error cleaning up user_books entry:', error);
+      }
+    }
+    onClose();
+  };
+
   // Move the auth check before the modal content
   if (!user) {
     return (
@@ -1022,144 +1049,207 @@ export default function BookRatingModal({
     );
   }
 
+  const handleBack = () => {
+    // Reset comparison-related state
+    setSentiment(null);
+    setShowComparison(false);
+    setComparisonHistory([]);
+    setCurrentComparisonBook(null);
+    setRemainingComparisons([]);
+  };
+
   // Initial sentiment selection view
   const renderSentimentSelection = () => (
-    <View style={styles.sentimentContainer}>
-      <Text style={styles.sectionTitle}>How was it?</Text>
-      <View style={styles.sentimentOptions}>
-        <Pressable 
-          style={[styles.sentimentButton, sentiment === 'loved' && styles.selectedSentiment]}
-          onPress={() => handleSentimentSelect('loved')}
-        >
-          <Text>I loved it!</Text>
-        </Pressable>
-        <Pressable 
-          style={[styles.sentimentButton, sentiment === 'liked' && styles.selectedSentiment]}
-          onPress={() => handleSentimentSelect('liked')}
-        >
-          <Text>I liked it</Text>
-        </Pressable>
-        <Pressable 
-          style={[styles.sentimentButton, sentiment === 'hated' && styles.selectedSentiment]}
-          onPress={() => handleSentimentSelect('hated')}
-        >
-          <Text>Not for me</Text>
-        </Pressable>
+    <View style={styles.modalContent}>
+      <Pressable 
+        style={styles.exitButton}
+        onPress={handleExit}
+      >
+        <X size={16} color="#666" />
+      </Pressable>
+
+      <View style={styles.header}>
+        <Text style={styles.title}>{book.volumeInfo.title}</Text>
+        <Text style={styles.category}>{book.volumeInfo.categories?.[0] || 'Uncategorized'}</Text>
+      </View>
+
+      <View style={styles.sentimentContainer}>
+        <Text style={styles.question}>What did you think?</Text>
+        <View style={styles.sentimentOptions}>
+          <Pressable 
+            style={[styles.sentimentButton, sentiment === 'loved' && styles.selectedSentiment]}
+            onPress={() => handleSentimentSelect('loved')}
+          >
+            <Text style={[styles.sentimentText, sentiment === 'loved' && styles.selectedSentimentText]}>
+              I loved it
+            </Text>
+          </Pressable>
+          <Pressable 
+            style={[styles.sentimentButton, sentiment === 'liked' && styles.selectedSentiment]}
+            onPress={() => handleSentimentSelect('liked')}
+          >
+            <Text style={[styles.sentimentText, sentiment === 'liked' && styles.selectedSentimentText]}>
+              I liked it
+            </Text>
+          </Pressable>
+          <Pressable 
+            style={[styles.sentimentButton, sentiment === 'hated' && styles.selectedSentiment]}
+            onPress={() => handleSentimentSelect('hated')}
+          >
+            <Text style={[styles.sentimentText, sentiment === 'hated' && styles.selectedSentimentText]}>
+              Not for me
+            </Text>
+          </Pressable>
+        </View>
       </View>
     </View>
   );
 
-  // Comparison view asking which book they preferred
+  // Comparison view
   const renderComparisonView = () => (
-    <View style={styles.comparisonContainer}>
-      <Text style={styles.question}>Which book did you prefer?</Text>
-      {isLoading ? (
-        <ActivityIndicator size="large" color="#007AFF" />
-      ) : (
-        <>
-          <View style={styles.booksContainer}>
-            {/* Left Book Card */}
-            <Pressable 
-              style={({ pressed }) => [
-                styles.bookCard,
-                styles.clickableCard,
-                pressed && styles.cardPressed
-              ]}
-              onPress={handlePreferCurrent}
-            >
-              <View style={styles.bookContent}>
-                <Text style={styles.bookTitle} numberOfLines={2}>
-                  {currentComparisonBook?.title || 'Loading...'}
-                </Text>
-                <Text style={styles.bookAuthor} numberOfLines={1}>
-                  {currentComparisonBook?.author || ''}
-                </Text>
-              </View>
-            </Pressable>
+    <View style={styles.modalContent}>
+      {/* Exit Button */}
+      <Pressable 
+        style={styles.exitButton}
+        onPress={handleExit}
+      >
+        <X size={16} color="#666" />
+      </Pressable>
 
-            {/* Right Book Card */}
-            <Pressable 
-              style={({ pressed }) => [
-                styles.bookCard,
-                styles.clickableCard,
-                pressed && styles.cardPressed
-              ]}
-              onPress={handlePreferComparison}
-            >
-              <View style={styles.bookContent}>
-                <Text style={styles.bookTitle} numberOfLines={2}>
-                  {book.volumeInfo.title}
-                </Text>
-                <Text style={styles.bookAuthor} numberOfLines={1}>
-                  {book.volumeInfo.authors?.[0]}
-                </Text>
-              </View>
-            </Pressable>
-          </View>
+      {/* Back Button */}
+      <Pressable 
+        style={styles.backButton}
+        onPress={handleBack}
+      >
+        <ChevronLeft size={16} color="#666" />
+        <Text style={styles.backButtonText}>back</Text>
+      </Pressable>
 
-          {/* Too Tough Button (Centered) */}
-          <Pressable 
-            style={styles.tooToughButton}
-            onPress={handleTooTough}
-          >
-            <Text style={styles.tooToughText}>too tough</Text>
-          </Pressable>
+      <View style={styles.header}>
+        <Text style={styles.title}>{book.volumeInfo.title}</Text>
+        <Text style={styles.category}>{book.volumeInfo.categories?.[0] || 'Uncategorized'}</Text>
+      </View>
 
-          {/* Bottom Actions Row */}
-          <View style={styles.actionButtons}>
-            <View style={styles.leftActions}>
+      <View style={styles.comparisonContainer}>
+        <Text style={styles.question}>Which book did you prefer?</Text>
+        {isLoading ? (
+          <ActivityIndicator size="large" color="#007AFF" />
+        ) : (
+          <>
+            <View style={styles.booksContainer}>
+              {/* Left Book Card */}
               <Pressable 
-                style={[styles.undoButton, !comparisonHistory.length && styles.undoButtonDisabled]}
-                onPress={handleUndo}
-                disabled={!comparisonHistory.length}
+                style={({ pressed }) => [
+                  styles.bookCard,
+                  pressed && styles.cardPressed
+                ]}
+                onPress={handlePreferCurrent}
               >
-                <ChevronLeft size={14} color={comparisonHistory.length ? "#666" : "#ccc"} />
-                <Text style={[styles.undoButtonText, !comparisonHistory.length && styles.undoButtonTextDisabled]}>
-                  undo
-                </Text>
+                <View style={styles.bookContent}>
+                  <Text style={styles.bookTitle} numberOfLines={2}>
+                    {currentComparisonBook?.title || 'Loading...'}
+                  </Text>
+                  <Text style={styles.bookAuthor} numberOfLines={1}>
+                    {currentComparisonBook?.author || ''}
+                  </Text>
+                </View>
+              </Pressable>
+
+              {/* Right Book Card */}
+              <Pressable 
+                style={({ pressed }) => [
+                  styles.bookCard,
+                  pressed && styles.cardPressed
+                ]}
+                onPress={handlePreferComparison}
+              >
+                <View style={styles.bookContent}>
+                  <Text style={styles.bookTitle} numberOfLines={2}>
+                    {book.volumeInfo.title}
+                  </Text>
+                  <Text style={styles.bookAuthor} numberOfLines={1}>
+                    {book.volumeInfo.authors?.[0]}
+                  </Text>
+                </View>
               </Pressable>
             </View>
 
-            <View style={styles.rightActions}>
-              <Pressable 
-                style={styles.skipButton}
-                onPress={handleSkip}
-              >
-                <Text style={styles.skipButtonText}>skip</Text>
-                <ChevronRight size={14} color="#666" />
-              </Pressable>
+            {/* Too Tough Button (Centered) */}
+            <Pressable 
+              style={styles.tooToughButton}
+              onPress={handleTooTough}
+            >
+              <Text style={styles.tooToughText}>too tough</Text>
+            </Pressable>
+
+            {/* Bottom Actions Row */}
+            <View style={styles.actionButtons}>
+              <View style={styles.leftActions}>
+                <Pressable 
+                  style={[styles.undoButton, !comparisonHistory.length && styles.undoButtonDisabled]}
+                  onPress={handleUndo}
+                  disabled={!comparisonHistory.length}
+                >
+                  <ChevronLeft size={14} color={comparisonHistory.length ? "#666" : "#ccc"} />
+                  <Text style={[styles.undoButtonText, !comparisonHistory.length && styles.undoButtonTextDisabled]}>
+                    undo
+                  </Text>
+                </Pressable>
+              </View>
+
+              <View style={styles.rightActions}>
+                <Pressable 
+                  style={styles.skipButton}
+                  onPress={handleSkip}
+                >
+                  <Text style={styles.skipButtonText}>skip</Text>
+                  <ChevronRight size={14} color="#666" />
+                </Pressable>
+              </View>
             </View>
-          </View>
-        </>
-      )}
+          </>
+        )}
+      </View>
     </View>
   );
 
-  // Add the review component render
+  // Review view
   const renderReviewView = () => (
-    <View style={styles.container}>
-      <Text style={styles.question}>Add a review (optional)</Text>
-      <TextInput
-        style={styles.reviewInput}
-        value={review}
-        onChangeText={setReview}
-        placeholder="Write your review..."
-        multiline
-      />
-      <Pressable 
-        style={[
-          styles.submitButton,
-          isSubmitting && styles.submitButtonDisabled
-        ]}
-        onPress={handleSubmit}
-        disabled={isSubmitting}
-      >
-        {isSubmitting ? (
-          <ActivityIndicator size="small" color="#FFFFFF" />
-        ) : (
-          <Text style={styles.submitButtonText}>Submit</Text>
-        )}
-      </Pressable>
+    <View style={styles.modalContent}>
+      <View style={styles.navigationButtons}>
+        <View style={styles.leftPlaceholder} />
+        <Pressable 
+          style={styles.exitButton}
+          onPress={handleExit}
+        >
+          <X size={16} color="#666" />
+        </Pressable>
+      </View>
+
+      <View style={styles.container}>
+        <Text style={styles.question}>Add a review (optional)</Text>
+        <TextInput
+          style={styles.textInput}
+          value={review}
+          onChangeText={setReview}
+          placeholder="Write your review..."
+          multiline
+        />
+        <Pressable 
+          style={[
+            styles.actionButton,
+            isSubmitting && styles.actionButtonDisabled
+          ]}
+          onPress={handleSubmit}
+          disabled={isSubmitting}
+        >
+          {isSubmitting ? (
+            <ActivityIndicator size="small" color="#FFFFFF" />
+          ) : (
+            <Text style={styles.actionButtonText}>Submit</Text>
+          )}
+        </Pressable>
+      </View>
     </View>
   );
 
@@ -1211,42 +1301,11 @@ export default function BookRatingModal({
       transparent={true}
       onRequestClose={onClose}
     >
-      <Animated.View style={[styles.modalContainer, { opacity: fadeAnim }]}>
-        <Animated.View
-          style={[
-            styles.modalContent,
-            { transform: [{ translateY: slideAnim }] },
-          ]}
-        >
-          {/* Add loading indicator */}
-          {isLoading && (
-            <View style={styles.loadingOverlay}>
-              <ActivityIndicator
-                size="large"
-                color="#007AFF"
-              />
-              <Text style={styles.loadingText}>Processing...</Text>
-            </View>
-          )}
-
-          {/* Add error display */}
-          {error && (
-            <View style={styles.errorContainer}>
-              <Text style={styles.errorText}>{error}</Text>
-            </View>
-          )}
-
-          {/* Header */}
-          <View style={styles.header}>
-            <Text style={styles.title}>{book.volumeInfo.title}</Text>
-            <Text style={styles.category}>
-              {book.volumeInfo.categories?.[0]}
-            </Text>
-          </View>
-
-          {renderContent()}
-        </Animated.View>
-      </Animated.View>
+      <View style={styles.modalContainer}>
+        {!sentiment ? renderSentimentSelection() : 
+         showComparison ? renderComparisonView() :
+         showReview ? renderReviewView() : null}
+      </View>
     </Modal>
   );
 }
@@ -1264,6 +1323,7 @@ const styles = StyleSheet.create({
     width: "90%",
     maxWidth: 400,
     padding: 20,
+    position: 'relative',
   },
   header: {
     alignItems: "center",
@@ -1279,69 +1339,80 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: "#666",
   },
-  sentimentContainer: {
-    alignItems: "center",
-    marginBottom: 24,
+  exitButton: {
+    position: 'absolute',
+    top: 16,
+    right: 16,
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#f0f0f0',
+    zIndex: 2,
   },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: "600",
+  navigationButtons: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    width: '100%',
     marginBottom: 16,
   },
-  sentimentOptions: {
-    flexDirection: "row",
-    justifyContent: "space-around",
-    width: "100%",
-    gap: 12,
-  },
-  sentimentButton: {
-    width: 100,
-    height: 100,
-    borderRadius: 50,
-    justifyContent: "center",
-    alignItems: "center",
-    position: "relative",
-  },
-  sentimentButtonSelected: {
-    transform: [{ scale: 1.1 }],
-  },
-  checkmark: {
-    position: "absolute",
-    top: "50%",
-    left: "50%",
-    transform: [{ translateX: -12 }, { translateY: -12 }],
-  },
-  sentimentText: {
-    color: "#fff",
-    fontSize: 14,
-    fontWeight: "600",
-    textAlign: "center",
-    marginTop: 8,
-  },
-  comparisonContainer: {
-    padding: 20,
-    width: '100%',
+  backButton: {
+    flexDirection: 'row',
     alignItems: 'center',
+    padding: 8,
+    borderRadius: 20,
+    backgroundColor: '#f0f0f0',
+    gap: 2,
+  },
+  sentimentContainer: {
+    alignItems: "center",
+    width: '100%',
+    marginTop: 20,
   },
   question: {
     fontSize: 24,
     fontWeight: '600',
-    marginBottom: 20,
+    marginBottom: 32,
     textAlign: 'center',
+  },
+  sentimentOptions: {
+    flexDirection: "column",
+    width: "100%",
+    gap: 12,
+  },
+  sentimentButton: {
+    backgroundColor: '#f5f5f5',
+    paddingVertical: 16,
+    paddingHorizontal: 24,
+    borderRadius: 12,
+    width: '100%',
+  },
+  sentimentText: {
+    fontSize: 16,
+    textAlign: 'center',
+    color: '#000',
+  },
+  selectedSentiment: {
+    backgroundColor: '#007AFF',
+  },
+  selectedSentimentText: {
+    color: '#FFFFFF',
+  },
+  comparisonContainer: {
+    width: '100%',
+    alignItems: 'center',
   },
   booksContainer: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     width: '100%',
-    marginBottom: 20,
-    gap: 15,
+    gap: 16,
   },
   bookCard: {
     flex: 1,
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#ffffff',
     borderRadius: 12,
     padding: 16,
-    height: 120,
+    minHeight: 100,
     justifyContent: 'center',
     alignItems: 'center',
     shadowColor: '#000',
@@ -1352,7 +1423,10 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.1,
     shadowRadius: 4,
     elevation: 3,
-    margin: 8,
+  },
+  cardPressed: {
+    backgroundColor: '#f5f5f5',
+    transform: [{ scale: 0.98 }],
   },
   bookContent: {
     alignItems: 'center',
@@ -1363,7 +1437,6 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     textAlign: 'center',
     marginBottom: 4,
-    maxWidth: '100%',
   },
   bookAuthor: {
     fontSize: 14,
@@ -1371,173 +1444,23 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   tooToughButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
-    backgroundColor: '#f0f0f0',
-    marginTop: 20,
-    marginBottom: 20,
-    alignSelf: 'center',
-  },
-  tooToughText: {
-    fontSize: 12,
-    color: '#666',
-    textTransform: 'lowercase',
-  },
-  vsText: {
-    marginHorizontal: 10,
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  comparisonActions: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 20,
-  },
-  comparisonButton: {
-    backgroundColor: '#007AFF',
-    padding: 10,
-    borderRadius: 8,
-    flex: 1,
-    marginHorizontal: 5,
-    alignItems: 'center',
-  },
-  buttonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  reviewContainer: {
-    gap: 16,
-  },
-  reviewInput: {
-    width: '100%',
-    minHeight: 100,
-    borderWidth: 1,
-    borderColor: '#ddd',
-    borderRadius: 8,
-    padding: 12,
-    marginVertical: 16,
-    textAlignVertical: 'top',
-  },
-  submitButton: {
-    backgroundColor: '#007AFF',
     paddingVertical: 12,
     paddingHorizontal: 24,
-    borderRadius: 8,
-    alignItems: 'center',
-  },
-  submitButtonDisabled: {
-    opacity: 0.5,
-  },
-  submitButtonText: {
-    color: '#FFFFFF',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  loadingOverlay: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    backgroundColor: "rgba(255,255,255,0.9)",
-    justifyContent: "center",
-    alignItems: "center",
-    zIndex: 1000,
-  },
-  loadingText: {
-    marginTop: 12,
-    fontSize: 16,
-    color: "#666",
-  },
-  errorContainer: {
-    backgroundColor: "#FFE5E5",
-    padding: 12,
-    borderRadius: 8,
-    marginBottom: 16,
-  },
-  errorText: {
-    color: "#D32F2F",
-    fontSize: 14,
-  },
-  authPromptContainer: {
-    alignItems: 'center',
-    padding: 24,
-  },
-  authTitle: {
-    fontSize: 24,
-    fontWeight: '600',
-    marginBottom: 12,
-    textAlign: 'center',
-  },
-  authDescription: {
-    fontSize: 16,
-    color: '#666',
-    textAlign: 'center',
-    marginBottom: 24,
-  },
-  signInButton: {
+    borderRadius: 24,
     backgroundColor: '#007AFF',
-    paddingHorizontal: 24,
-    paddingVertical: 12,
-    borderRadius: 8,
-  },
-  signInButtonText: {
-    color: '#fff',
-    fontSize: 16,
-    fontWeight: '600',
-  },
-  container: {
-    alignItems: 'center',
-    padding: 24,
-  },
-  question: {
-    fontSize: 20,
-    fontWeight: '600',
-    marginBottom: 16,
-  },
-  sentimentButtons: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  button: {
-    backgroundColor: '#f8f8f8',
-    padding: 12,
-    borderRadius: 8,
-  },
-  selectedSentiment: {
-    backgroundColor: '#007AFF',
-    color: '#fff',
-  },
-  tooToughContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  tooToughButton: {
-    backgroundColor: '#007AFF',
-    padding: 10,
-    borderRadius: 8,
+    marginTop: 32,
+    marginBottom: 32,
   },
   tooToughText: {
-    color: '#FFFFFF',
     fontSize: 16,
-    fontWeight: '600',
-  },
-  clickableCard: {
-    backgroundColor: '#ffffff',
-  },
-  cardPressed: {
-    backgroundColor: '#f0f0f0',
-    transform: [{ scale: 0.98 }],
+    color: '#FFFFFF',
+    textAlign: 'center',
   },
   actionButtons: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     width: '100%',
-    marginTop: 16,
     paddingHorizontal: 8,
   },
   leftActions: {
@@ -1581,5 +1504,54 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#666',
     textTransform: 'lowercase',
+  },
+  backButtonText: {
+    fontSize: 11,
+    color: '#666',
+    textTransform: 'lowercase',
+  },
+  leftPlaceholder: {
+    width: 32, // Same width as exit button
+  },
+  container: {
+    alignItems: 'center',
+    padding: 24,
+    paddingTop: 60,
+    position: 'relative',
+    width: '100%',
+  },
+  sentimentButtons: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  button: {
+    backgroundColor: '#f8f8f8',
+    padding: 12,
+    borderRadius: 8,
+  },
+  textInput: {
+    width: '100%',
+    minHeight: 100,
+    borderWidth: 1,
+    borderColor: '#ddd',
+    borderRadius: 8,
+    padding: 12,
+    marginVertical: 16,
+    textAlignVertical: 'top',
+  },
+  actionButton: {
+    backgroundColor: '#007AFF',
+    paddingVertical: 12,
+    paddingHorizontal: 24,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  actionButtonDisabled: {
+    opacity: 0.5,
+  },
+  actionButtonText: {
+    color: '#FFFFFF',
+    fontSize: 16,
+    fontWeight: '600',
   },
 });

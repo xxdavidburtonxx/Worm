@@ -32,7 +32,7 @@ export default function InviteScreen() {
         const { data } = await Contacts.getContactsAsync({
           fields: [Contacts.Fields.PhoneNumbers, Contacts.Fields.Emails],
         });
-        setContacts(data);
+        setContacts(data as Contact[]);
       }
     } catch (error) {
       console.error('Error loading contacts:', error);

@@ -4,6 +4,8 @@
   <dict>
     <key>CADisableMinimumFrameDurationOnPhone</key>
     <true/>
+    <key>CFBundleAllowMixedLocalizations</key>
+    <true/>
     <key>CFBundleDevelopmentRegion</key>
     <string>$(DEVELOPMENT_LANGUAGE)</string>
     <key>CFBundleDisplayName</key>
@@ -35,6 +37,12 @@
         <key>CFBundleURLSchemes</key>
         <array>
           <string>com.googleusercontent.apps.781569259169-vb9euujjv37dp0erqj15htp10klokg4c</string>
+        </array>
+      </dict>
+      <dict>
+        <key>CFBundleURLSchemes</key>
+        <array>
+          <string>exp+worm</string>
         </array>
       </dict>
     </array>

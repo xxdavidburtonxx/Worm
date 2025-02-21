@@ -1,9 +1,9 @@
 import { useRouter } from "expo-router";
-import { X, UserPlus, LogOut } from "lucide-react-native";
+import { X, UserPlus, LogOut, Settings, Target } from "lucide-react-native";
 import React from "react";
 import { View, Text, StyleSheet, Pressable, Animated } from "react-native";
-
 import { useAuth } from "@/hooks/useAuth";
+import { showToast } from "@/components/Toast";
 
 interface Props {
   isVisible: boolean;
@@ -13,95 +13,122 @@ interface Props {
 export default function ProfileMenu({ isVisible, onClose }: Props) {
   const router = useRouter();
   const { signOut } = useAuth();
-  const slideAnim = React.useRef(new Animated.Value(400)).current;
 
-  React.useEffect(() => {
-    Animated.spring(slideAnim, {
-      toValue: isVisible ? 0 : 400,
-      useNativeDriver: true,
-    }).start();
-  }, [isVisible]);
+  const handleEditProfile = () => {
+    onClose();
+    router.push('/profile/edit');
+  };
+
+  const handleCreateGoals = () => {
+    onClose();
+    // TODO: Implement goals page navigation
+    showToast.info({
+      title: "Coming Soon",
+      message: "Goals feature is under development"
+    });
+  };
 
   const handleLogout = async () => {
-    await signOut();
-    router.replace("/auth/login");
+    try {
+      await signOut();
+      onClose();
+    } catch (error) {
+      console.error('Error signing out:', error);
+      showToast.error({
+        title: "Error",
+        message: "Failed to sign out"
+      });
+    }
   };
 
   return (
-    <>
-      {isVisible && (
-        <Pressable style={styles.overlay} onPress={onClose}>
-          <View style={styles.overlayContent} />
+    <Animated.View 
+      style={[
+        styles.container,
+        {
+          transform: [
+            {
+              translateX: isVisible ? 0 : 300,
+            },
+          ],
+        },
+      ]}
+    >
+      <View style={styles.header}>
+        <Text style={styles.title}>Menu</Text>
+        <Pressable onPress={onClose} style={styles.closeButton}>
+          <X size={24} color="#000" />
         </Pressable>
-      )}
-      <Animated.View
-        style={[styles.menu, { transform: [{ translateX: slideAnim }] }]}
-      >
-        <View style={styles.header}>
-          <Text style={styles.title}>Menu</Text>
-          <Pressable onPress={onClose}>
-            <X size={24} color="#000" />
-          </Pressable>
-        </View>
+      </View>
 
-        <Pressable
-          style={styles.menuItem}
-          onPress={() => {
-            onClose();
-            router.push("/search/invite");
-          }}
-        >
-          <UserPlus size={20} color="#000" />
-          <Text style={styles.menuItemText}>Invite Friends</Text>
+      <View style={styles.content}>
+        <Pressable style={styles.menuItem} onPress={handleEditProfile}>
+          <Settings size={20} color="#000" />
+          <Text style={styles.menuItemText}>Edit Profile</Text>
         </Pressable>
 
-        <Pressable style={styles.menuItem} onPress={handleLogout}>
-          <LogOut size={20} color="#000" />
-          <Text style={styles.menuItemText}>Log Out</Text>
+        <Pressable style={styles.menuItem} onPress={handleCreateGoals}>
+          <Target size={20} color="#000" />
+          <Text style={styles.menuItemText}>Create Goals</Text>
         </Pressable>
-      </Animated.View>
-    </>
+
+        <Pressable style={[styles.menuItem, styles.logoutItem]} onPress={handleLogout}>
+          <LogOut size={20} color="#FF3B30" />
+          <Text style={[styles.menuItemText, styles.logoutText]}>Log Out</Text>
+        </Pressable>
+      </View>
+    </Animated.View>
   );
 }
 
 const styles = StyleSheet.create({
-  overlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(0,0,0,0.5)",
-  },
-  overlayContent: {
-    flex: 1,
-  },
-  menu: {
-    position: "absolute",
-    right: 0,
+  container: {
+    position: 'absolute',
     top: 0,
+    right: 0,
     bottom: 0,
     width: 300,
-    backgroundColor: "#fff",
-    padding: 16,
-    shadowColor: "#000",
-    shadowOffset: { width: -2, height: 0 },
+    backgroundColor: '#fff',
+    shadowColor: '#000',
+    shadowOffset: {
+      width: -2,
+      height: 0,
+    },
     shadowOpacity: 0.1,
-    shadowRadius: 8,
+    shadowRadius: 10,
+    elevation: 5,
   },
   header: {
-    flexDirection: "row",
-    justifyContent: "space-between",
-    alignItems: "center",
-    marginBottom: 24,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: '#f1f1f1',
   },
   title: {
-    fontSize: 20,
-    fontWeight: "600",
+    fontSize: 18,
+    fontWeight: '600',
+  },
+  closeButton: {
+    padding: 4,
+  },
+  content: {
+    padding: 16,
   },
   menuItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    padding: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
     gap: 12,
   },
   menuItemText: {
     fontSize: 16,
+  },
+  logoutItem: {
+    marginTop: 24,
+  },
+  logoutText: {
+    color: '#FF3B30',
   },
 });

@@ -37,6 +37,7 @@ export default function TabLayout() {
         options={{
           title: "Profile",
           tabBarIcon: ({ color }) => <User size={24} color={color} />,
+          href: "/(tabs)/profile"
         }}
       />
     </Tabs>

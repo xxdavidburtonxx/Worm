@@ -1,0 +1,16 @@
+---
+description: color scheme
+globs: 
+---
+
+# Your rule content
+
+- I want the color scheme to be these colors for the whole code base.
+const colors = {
+  desertSand: '#DF5B39F',
+  warmBrown: '#A27C62',
+  lightKhaki: '#F2EBD4',
+  siennaBrown: '#9A634E',
+  goldenSand: '#EAD0B3',
+  softBrown: 'rgba(162, 124, 98, 0.1)',
+};

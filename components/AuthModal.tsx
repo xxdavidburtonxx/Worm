@@ -1,3 +1,8 @@
+import { Pressable, StyleSheet, Text, View } from "react-native";
+
+import { Modal } from "react-native";
+import AuthGuard from "./AuthGuard";
+
 interface Props {
   isVisible: boolean;
   onClose: () => void;

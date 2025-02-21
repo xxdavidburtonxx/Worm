@@ -26,6 +26,7 @@ import {
 } from "react-native";
 import debounce from 'lodash/debounce';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { Avatar } from 'react-native-paper';
 
 // Local imports
 import BookRatingModal from "@/components/BookRatingModal";
@@ -46,6 +47,13 @@ type SearchMode = "books" | "friends";
 type Filter = "fiction" | "nonfiction" | "self-help";
 
 const FILTERS: Filter[] = ["fiction", "nonfiction", "self-help"];
+
+// Add colors object
+const colors = {
+  warmBrown: '#A27C62',
+  siennaBrown: '#9A634E',
+  // ... add other colors as needed
+};
 
 export default function SearchScreen() {
   const { supabase } = useSupabase();
@@ -139,22 +147,27 @@ export default function SearchScreen() {
   };
 
   const checkFollowingStatus = async (profiles: Profile[]) => {
-    if (!user) return;
+    if (!user?.id) return;
     
-    const { data: friendships } = await supabase
-      .from('friendships')
-      .select('friend_id')
-      .eq('user_id', user.id)
-      .in('friend_id', profiles.map(p => p.id));
+    try {
+      const { data: friendships } = await supabase
+        .from('friendships')
+        .select('friend_id')
+        .eq('user_id', user.id)
+        .in('friend_id', profiles.map(p => p.id));
 
-    const following = new Map();
-    friendships?.forEach(f => following.set(f.friend_id, true));
-    
-    setFollowingMap(Object.fromEntries(following));
+      if (friendships) {
+        const following = new Map();
+        friendships.forEach(f => following.set(f.friend_id, true));
+        setFollowingMap(Object.fromEntries(following));
+      }
+    } catch (error) {
+      console.error('Error checking following status:', error);
+    }
   };
 
   const fetchExistingFriendships = async () => {
-    if (!user) return;
+    if (!user?.id) return;
     
     try {
       const { data: friendships } = await supabase
@@ -359,6 +372,10 @@ export default function SearchScreen() {
     }
   };
 
+  const handleUserPress = (userId: string) => {
+    router.push(`/profile/${userId}`);
+  };
+
   const renderBookItem = ({ item }: { item: GoogleBook }) => {
     const book = item.volumeInfo;
     return (
@@ -407,10 +424,7 @@ export default function SearchScreen() {
       style={styles.friendItem}
       onPress={() => {
         saveRecentSearch(item);
-        router.push({
-          pathname: "/profile/[id]",
-          params: { id: item.id }
-        });
+        handleUserPress(item.id);
       }}
     >
       <Image
@@ -620,7 +634,23 @@ export default function SearchScreen() {
             ) : (
               /* Search Results */
               <View style={styles.searchResults}>
-                {friendSearchResults.map((profile) => renderFriendItem({ item: profile }))}
+                {friendSearchResults.map((profile) => (
+                  <Pressable 
+                    key={profile.id} 
+                    style={styles.userItem}
+                    onPress={() => handleUserPress(profile.id)}
+                  >
+                    <Avatar.Text 
+                      size={40} 
+                      label={profile.username?.substring(0, 2).toUpperCase() || 'U'} 
+                      style={{ backgroundColor: colors.warmBrown }}
+                    />
+                    <View style={styles.userInfo}>
+                      <Text style={styles.username}>{profile.username}</Text>
+                      <Text style={styles.userBio}>{profile.bio || 'No bio yet'}</Text>
+                    </View>
+                  </Pressable>
+                ))}
               </View>
             )}
           </ScrollView>
@@ -635,7 +665,6 @@ export default function SearchScreen() {
               setIsRatingModalVisible(false);
               setSelectedBook(null);
             }}
-            source="search"
           />
         )}
       </View>
@@ -877,7 +906,29 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
   },
+  followingButtonText: {  // Add this style
+    color: '#666',
+  },
   loader: {
     marginLeft: 12,
+  },
+  userItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 12,
+    backgroundColor: "#fff",
+    borderBottomWidth: 1,
+    borderBottomColor: "#f1f1f1",
+  },
+  userInfo: {
+    flex: 1,
+  },
+  username: {
+    fontSize: 16,
+    fontWeight: "600",
+  },
+  userBio: {
+    fontSize: 14,
+    color: "#666",
   },
 });

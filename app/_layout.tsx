@@ -11,7 +11,6 @@ import React, { useEffect } from "react";
 import { View, Pressable } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import Toast, { toastConfig } from "@/components/Toast";
-import { GoogleSignin } from '@react-native-google-signin/google-signin';
 import { ArrowLeft } from 'lucide-react-native';
 
 // External packages
@@ -37,12 +36,14 @@ function AuthGuard() {
   const { user, isLoading } = useAuth();
 
   useEffect(() => {
-    console.log('Available routes:', {
+    console.log('AuthGuard effect triggered:', {
+      timestamp: new Date().toISOString(),
+      isLoading,
+      hasUser: !!user,
       segments,
-      protectedSegments: PROTECTED_SEGMENTS,
+      currentPath: segments.join('/'),
       currentSegment: segments[0],
-      fullPath: segments.join('/'),
-      isProtected: PROTECTED_SEGMENTS.includes(segments[0])
+      isProtectedRoute: PROTECTED_SEGMENTS.includes(segments[0])
     });
 
     if (isLoading) {
@@ -54,58 +55,92 @@ function AuthGuard() {
       (segment) => segments[0] === segment,
     );
 
-    console.log('Route protection check:', {
+    console.log('Route protection decision:', {
+      timestamp: new Date().toISOString(),
       inProtectedRoute,
-      segments,
-      isAuthenticated: !!user,
-      protectedSegments: PROTECTED_SEGMENTS,
-      matchedSegment: segments[0],
-      fullPath: segments.join('/'),
-      isFollowersRoute: segments[0] === 'followers'
+      hasUser: !!user,
+      currentPath: segments.join('/'),
+      action: !user && inProtectedRoute ? 'redirecting to auth' : 
+              user && !inProtectedRoute ? 'redirecting to tabs' : 'no redirect needed'
     });
 
     if (!user && inProtectedRoute) {
-      console.log('Unauthorized access, redirecting to auth');
+      console.log('Redirecting to auth:', {
+        timestamp: new Date().toISOString(),
+        from: segments.join('/'),
+        to: AUTH_ROUTE
+      });
       router.replace(AUTH_ROUTE);
     } else if (user && !inProtectedRoute) {
-      console.log('Authenticated user in public route, redirecting to tabs');
+      console.log('Redirecting to tabs:', {
+        timestamp: new Date().toISOString(),
+        from: segments.join('/'),
+        to: '/(tabs)'
+      });
       router.replace("/(tabs)");
     }
   }, [user, segments, isLoading]);
 
   // Don't render anything during the initial loading
   if (isLoading) {
+    console.log('AuthGuard is loading:', {
+      timestamp: new Date().toISOString(),
+      segments: segments.join('/')
+    });
     return null;
   }
 
+  console.log('AuthGuard rendering Stack:', {
+    timestamp: new Date().toISOString(),
+    hasUser: !!user,
+    currentPath: segments.join('/')
+  });
   return <Stack />;
 }
 
 // Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
 
-export default function RootLayout() {
+function RootLayout() {
   const colorScheme = useColorScheme();
   const [loaded] = useFonts({
     SpaceMono: require("../assets/fonts/SpaceMono-Regular.ttf"),
   });
 
-  // Configure Google Sign-In once at app startup
-  useEffect(() => {
-    GoogleSignin.configure({
-      webClientId: '781569259169-ao9gntvu1rlc1dmr9e8hnsm7horq8gtk.apps.googleusercontent.com',
-    });
-  }, []);
+  console.log('RootLayout initialization:', {
+    timestamp: new Date().toISOString(),
+    fontsLoaded: loaded,
+    colorScheme
+  });
 
   useEffect(() => {
+    console.log('RootLayout effect:', {
+      timestamp: new Date().toISOString(),
+      fontsLoaded: loaded,
+      action: loaded ? 'hiding splash screen' : 'waiting for fonts'
+    });
+
     if (loaded) {
-      SplashScreen.hideAsync();
+      SplashScreen.hideAsync().catch(error => {
+        console.error('Error hiding splash screen:', {
+          timestamp: new Date().toISOString(),
+          error
+        });
+      });
     }
   }, [loaded]);
 
   if (!loaded) {
+    console.log('RootLayout waiting for fonts:', {
+      timestamp: new Date().toISOString()
+    });
     return null;
   }
+
+  console.log('RootLayout rendering:', {
+    timestamp: new Date().toISOString(),
+    colorScheme
+  });
 
   return (
     <AuthProvider>
@@ -155,7 +190,15 @@ export default function RootLayout() {
               }} 
             />
             <Stack.Screen 
-              name="followers" 
+              name="followers/[id]" 
+              options={{
+                presentation: 'card',
+                headerShown: false,
+                animation: 'slide_from_right',
+              }} 
+            />
+            <Stack.Screen 
+              name="followers/index" 
               options={{
                 presentation: 'card',
                 headerShown: true,
@@ -166,10 +209,8 @@ export default function RootLayout() {
               name="profile/[id]" 
               options={{
                 presentation: 'card',
-                headerShown: true,
-                title: 'Profile',
+                headerShown: false,
                 animation: 'slide_from_right',
-                headerBackTitle: 'Back',
               }} 
             />
             <Stack.Screen 
@@ -180,6 +221,14 @@ export default function RootLayout() {
                 title: 'Edit Profile',
               }} 
             />
+            <Stack.Screen 
+              name="bookshelf/[id]" 
+              options={{
+                presentation: 'card',
+                headerShown: false,
+                animation: 'slide_from_right',
+              }} 
+            />
           </Stack>
           <Toast config={toastConfig} />
         </GestureHandlerRootView>
@@ -187,3 +236,5 @@ export default function RootLayout() {
     </AuthProvider>
   );
 }
+
+export default RootLayout;

@@ -32,10 +32,18 @@ const colors = {
 };
 
 function FollowersScreen() {
-  const { id } = useLocalSearchParams();
+  const { id: profileId } = useLocalSearchParams();
   const router = useRouter();
   const { supabase } = useSupabase();
   const { user } = useAuth();
+
+  // Add debug logging for initial mount
+  console.log('FollowersScreen initialized:', {
+    profileId,
+    currentUserId: user?.id,
+    timestamp: new Date().toISOString()
+  });
+
   const [followers, setFollowers] = useState<Profile[]>([]);
   const [filteredFollowers, setFilteredFollowers] = useState<Profile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -43,14 +51,24 @@ function FollowersScreen() {
   const [profileUsername, setProfileUsername] = useState<string>('');
 
   useEffect(() => {
-    console.log('FollowersScreen mounted:', {
-      userId: user?.id,
-      timestamp: new Date().toISOString(),
-      path: router.pathname
+    if (!profileId) {
+      console.log('No profileId available:', {
+        params: useLocalSearchParams(),
+        timestamp: new Date().toISOString()
+      });
+      return;
+    }
+    
+    console.log('Loading followers for profile:', {
+      profileId,
+      currentUserId: user?.id,
+      isOwnProfile: profileId === user?.id,
+      timestamp: new Date().toISOString()
     });
+    
     fetchProfile();
     fetchFollowers();
-  }, [id]);
+  }, [profileId, user]);
 
   useEffect(() => {
     if (searchQuery.trim() === '') {
@@ -65,14 +83,28 @@ function FollowersScreen() {
   }, [searchQuery, followers]);
 
   const fetchProfile = async () => {
+    if (!profileId) return;
+    
     try {
+      console.log('Fetching profile data:', {
+        profileId,
+        timestamp: new Date().toISOString()
+      });
+
       const { data, error } = await supabase
         .from('profiles')
         .select('username')
-        .eq('id', id)
+        .eq('id', profileId)
         .single();
 
       if (error) throw error;
+      
+      console.log('Profile data received:', {
+        profileId,
+        username: data.username,
+        timestamp: new Date().toISOString()
+      });
+      
       setProfileUsername(data.username);
     } catch (error) {
       console.error('Error fetching profile:', error);
@@ -80,11 +112,13 @@ function FollowersScreen() {
   };
 
   const fetchFollowers = async () => {
-    if (!user) return;
+    if (!profileId) return;
 
     try {
-      console.log('Fetching followers:', {
-        userId: user.id,
+      console.log('Fetching followers - Query details:', {
+        profileId,
+        queryType: 'friendships',
+        filterField: 'friend_id',
         timestamp: new Date().toISOString()
       });
 
@@ -99,23 +133,33 @@ function FollowersScreen() {
             avatar_url
           )
         `)
-        .eq('friend_id', user.id);
+        .eq('friend_id', profileId);
 
-      if (friendshipsError) {
-        console.error('Error fetching followers:', {
-          error: friendshipsError,
-          userId: user.id,
-          timestamp: new Date().toISOString()
-        });
-        throw friendshipsError;
-      }
+      if (friendshipsError) throw friendshipsError;
 
-      console.log('Followers fetched successfully:', {
-        count: friendships.length,
+      console.log('Raw friendships data:', {
+        friendships,
+        count: friendships?.length || 0,
+        firstUserId: friendships?.[0]?.user_id,
         timestamp: new Date().toISOString()
       });
 
-      const followersData = friendships.map(friendship => friendship.user);
+      const followersData = (friendships || []).map(friendship => {
+        const user = friendship.user as any;
+        return {
+          id: user.id,
+          username: user.username,
+          name: user.name,
+          avatar_url: user.avatar_url
+        };
+      });
+
+      console.log('Processed followers data:', {
+        followersCount: followersData.length,
+        sampleFollower: followersData[0],
+        timestamp: new Date().toISOString()
+      });
+
       setFollowers(followersData);
       setFilteredFollowers(followersData);
     } catch (error) {

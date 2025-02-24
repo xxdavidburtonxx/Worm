@@ -490,12 +490,14 @@ export default function ProfileScreen() {
         <Pressable 
           style={styles.stat}
           onPress={() => {
-            console.log('Attempting to navigate to followers:', {
-              route: '/followers',
+            console.log('Navigating to followers:', {
               userId: user.id,
               timestamp: new Date().toISOString()
             });
-            router.push('/followers');
+            router.push({
+              pathname: '/followers/[id]',
+              params: { id: user.id }
+            });
           }}
         >
           <Text style={styles.statNumber}>{stats.followers}</Text>

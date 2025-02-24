@@ -39,12 +39,6 @@
           <string>com.googleusercontent.apps.781569259169-vb9euujjv37dp0erqj15htp10klokg4c</string>
         </array>
       </dict>
-      <dict>
-        <key>CFBundleURLSchemes</key>
-        <array>
-          <string>exp+worm</string>
-        </array>
-      </dict>
     </array>
     <key>CFBundleVersion</key>
     <string>1</string>

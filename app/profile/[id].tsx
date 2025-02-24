@@ -1,33 +1,29 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Tabs } from "expo-router";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Share2, Menu } from "lucide-react-native";
+import { Book, BookOpen, Search, User, ArrowLeft } from "lucide-react-native";
 import React, { useState, useEffect } from "react";
 import {
   View,
   Text,
   StyleSheet,
-  Image,
   ScrollView,
   Pressable,
   Share,
   ActivityIndicator,
 } from "react-native";
-import { Avatar, Button, IconButton, Surface } from 'react-native-paper';
+import { Avatar, IconButton, Surface } from 'react-native-paper';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { BookshelfPreview } from "@/components/BookshelfPreview";
-import { CachedImage } from "@/components/CachedImage";
 import { FollowButton } from "@/components/FollowButton";
 import { PersonalFeed } from "@/components/PersonalFeed";
-import ProfileMenu from "@/components/ProfileMenu";
-import { UserStats } from "@/components/UserStats";
-import type { Profile, UserBook } from "@/components/types";
+import type { Profile } from "@/components/types";
 import { useAuth } from "@/hooks/useAuth";
 import { useSupabase } from "@/hooks/useSupabase";
 import { showToast } from "@/components/Toast";
 import AuthGuard from "@/components/AuthGuard";
-import { EditProfileButton } from "@/components/EditProfileButton";
-import { ShareProfileButton } from "@/components/ShareProfileButton";
+import MenuModal from '@/components/MenuModal';
 
 // Custom theme colors with slight adjustments for better aesthetics
 const colors = {
@@ -39,33 +35,90 @@ const colors = {
   softBrown: 'rgba(162, 124, 98, 0.1)',
 };
 
-interface ProfileData {
-  username: string;
-  avatar_url: string | null;
-  created_at: string;
-  bio: string | null;
-  followers_count: number;
-  following_count: number;
-  books_read: number;
+function TabLayout() {
+  const router = useRouter();
+  
+  return (
+    <Tabs 
+      screenOptions={{ 
+        headerShown: false,
+        tabBarStyle: {
+          position: 'absolute',
+          bottom: 0,
+          left: 0,
+          right: 0,
+          elevation: 0,
+          backgroundColor: '#fff',
+          borderTopColor: '#f1f1f1',
+          height: 60,
+          paddingBottom: 8,
+        }
+      }}
+    >
+      <Tabs.Screen
+        name="index"
+        options={{
+          title: "Feed",
+          tabBarIcon: ({ color }) => <BookOpen size={24} color={color} />,
+          href: "/(tabs)",
+        }}
+      />
+      <Tabs.Screen
+        name="bookshelf"
+        options={{
+          title: "Bookshelf",
+          tabBarIcon: ({ color }) => <Book size={24} color={color} />,
+          href: "/(tabs)/bookshelf",
+        }}
+      />
+      <Tabs.Screen
+        name="search"
+        options={{
+          title: "Search",
+          tabBarIcon: ({ color }) => <Search size={24} color={color} />,
+          href: "/(tabs)/search",
+        }}
+      />
+      <Tabs.Screen
+        name="profile"
+        options={{
+          title: "Profile",
+          tabBarIcon: ({ color }) => <User size={24} color={color} />,
+          href: "/(tabs)/profile",
+        }}
+      />
+    </Tabs>
+  );
 }
 
-export default function UserProfileScreen() {
+export default function WrappedUserProfileScreen() {
+  return (
+    <View style={{ flex: 1 }}>
+      <UserProfileScreen />
+      <TabLayout />
+    </View>
+  );
+}
+
+function UserProfileScreen() {
   const { id } = useLocalSearchParams();
   const router = useRouter();
   const { supabase } = useSupabase();
   const { user } = useAuth();
   const [profile, setProfile] = useState<Profile | null>(null);
-  const [readBooks, setReadBooks] = useState<UserBook[]>([]);
-  const [wantToReadBooks, setWantToReadBooks] = useState<UserBook[]>([]);
-  const [stats, setStats] = useState({
-    followers: 0,
-    booksRead: 0,
-    ranking: 0
-  });
-  const [isMenuVisible, setIsMenuVisible] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [memberSince, setMemberSince] = useState<string>('');
+  const [menuVisible, setMenuVisible] = useState(false);
+  const [favoriteBook, setFavoriteBook] = useState('-');
+  const [stats, setStats] = useState({
+    followers: 0,
+    booksRead: 0,
+    ranking: '-' as number | string,
+    booksToRead: 0
+  });
+  const [userGoal, setUserGoal] = useState<number | null>(null);
+  const [goalProgress, setGoalProgress] = useState(0);
 
   const isOwnProfile = user?.id === id;
 
@@ -87,6 +140,10 @@ export default function UserProfileScreen() {
         month: 'long',
         year: 'numeric'
       }));
+
+      // Fetch stats
+      await fetchStats();
+      await fetchFavoriteBook();
     } catch (error) {
       console.error('Error fetching profile:', error);
       showToast.error({
@@ -97,6 +154,87 @@ export default function UserProfileScreen() {
       setIsLoading(false);
     }
   };
+
+  const fetchStats = async () => {
+    try {
+      // Get followers count
+      const { count: followersCount } = await supabase
+        .from('friendships')
+        .select('count', { count: 'exact' })
+        .eq('friend_id', id);
+
+      // Get books read count
+      const { count: booksReadCount } = await supabase
+        .from('user_books')
+        .select('count', { count: 'exact' })
+        .eq('user_id', id)
+        .eq('status', 'READ');
+
+      const { count: booksToReadCount } = await supabase
+        .from('user_books')
+        .select('count', { count: 'exact' })
+        .eq('user_id', id)
+        .eq('status', 'WANT_TO_READ');
+
+      // Get all users' book counts to calculate ranking
+      const { data: userBookCounts } = await supabase
+        .from('user_books')
+        .select('user_id')
+        .eq('status', 'READ');
+
+      // Calculate ranking
+      const bookCountMap = (userBookCounts || []).reduce((acc: Record<string, number>, item: any) => {
+        acc[item.user_id] = (acc[item.user_id] || 0) + 1;
+        return acc;
+      }, {});
+
+      const rankings = Object.entries(bookCountMap)
+        .map(([userId, count]) => ({ userId, count }))
+        .sort((a, b) => b.count - a.count);
+
+      const userRanking = rankings.findIndex(r => r.userId === id) + 1;
+
+      setStats({
+        followers: followersCount || 0,
+        booksRead: booksReadCount || 0,
+        ranking: booksReadCount ? userRanking : '-',
+        booksToRead: booksToReadCount || 0
+      });
+    } catch (error) {
+      console.error('Error fetching stats:', error);
+    }
+  };
+
+  const fetchFavoriteBook = async () => {
+    try {
+      interface BookData {
+        book: {
+          title: string;
+        };
+      }
+
+      const { data } = await supabase
+        .from('user_books')
+        .select(`
+          rating,
+          book:books (
+            title
+          )
+        `)
+        .eq('user_id', id)
+        .eq('status', 'READ')
+        .order('rating', { ascending: false })
+        .limit(1)
+        .single<BookData>();
+
+      if (data?.book?.title) {
+        setFavoriteBook(data.book.title);
+      }
+    } catch (error) {
+      console.error('Error fetching favorite book:', error);
+    }
+  };
+
 
   useEffect(() => {
     fetchProfile();
@@ -109,12 +247,6 @@ export default function UserProfileScreen() {
       });
     } catch (error) {
       console.error("Error sharing profile:", error);
-    }
-  };
-
-  const handleProfilePress = () => {
-    if (!isOwnProfile) {
-      router.push('/(tabs)');
     }
   };
 
@@ -138,10 +270,20 @@ export default function UserProfileScreen() {
     );
   }
 
+
   return (
     <ScrollView style={styles.container}>
       <View style={styles.header}>
-        <Text style={[styles.name, styles.headerTitle]}>Worm</Text>
+        <View style={styles.headerLeft}>
+          <IconButton
+            icon="arrow-left"
+            size={24}
+            onPress={() => router.back()}
+            style={styles.backButton}
+            iconColor={colors.siennaBrown}
+          />
+          <Text style={[styles.name, styles.headerTitle]}>Worm</Text>
+        </View>
         <View style={styles.headerButtons}>
           <IconButton 
             icon="share" 
@@ -150,74 +292,119 @@ export default function UserProfileScreen() {
             iconColor={colors.siennaBrown}
             onPress={handleShare}
           />
+          <IconButton 
+            icon="menu" 
+            size={24}
+            containerColor={colors.softBrown}
+            iconColor={colors.siennaBrown}
+            onPress={() => setMenuVisible(true)}
+          />
         </View>
       </View>
 
       <View style={styles.avatarContainer}>
-        <Pressable onPress={handleProfilePress}>
-          <Avatar.Image 
-            size={90} 
-            source={{ uri: avatarUrl || 'https://via.placeholder.com/90' }}
-            style={styles.avatar}
-          />
-        </Pressable>
+        <Avatar.Image 
+          size={90} 
+          source={{ uri: avatarUrl || 'https://via.placeholder.com/90' }}
+          style={styles.avatar}
+        />
         <Text style={styles.username}>@{profile.username || profile.name}</Text>
         <Text style={styles.memberSince}>Member since {memberSince}</Text>
-        <Text style={styles.bio}>{profile.bio}</Text>
+        {profile.bio && <Text style={styles.bio}>{profile.bio}</Text>}
         
         {!isOwnProfile && (
           <View style={styles.buttonContainer}>
             <FollowButton 
               userId={id as string}
-              onFollowChange={() => {
-                // Optionally refresh the profile stats
-                // This will update the followers count
-                fetchProfile();
-              }}
+              onFollowChange={fetchStats}
             />
           </View>
         )}
       </View>
 
       <View style={styles.statsContainer}>
-        <View style={styles.stat}>
+        <Pressable 
+          style={styles.stat}
+          onPress={() => router.push({
+            pathname: '/followers/[id]',
+            params: { id: id as string }
+          })}
+        >
           <Text style={styles.statNumber}>{stats.followers}</Text>
-          <Text style={styles.statLabel}>Followers</Text>
-        </View>
+          <Text style={[styles.statLabel, styles.clickableLabel]}>Followers</Text>
+        </Pressable>
         <View style={styles.stat}>
           <Text style={styles.statNumber}>{stats.booksRead}</Text>
           <Text style={styles.statLabel}>Books Read</Text>
         </View>
-        <View style={styles.stat}>
+        <Pressable 
+          style={styles.stat}
+          onPress={() => router.push('/rankings')}
+        >
           <Text style={styles.statNumber}>{stats.ranking}</Text>
-          <Text style={styles.statLabel}>Worm Ranking</Text>
-        </View>
+          <Text style={[styles.statLabel, styles.clickableLabel]}>Worm Ranking</Text>
+        </Pressable>
       </View>
 
-      <BookshelfPreview
-        userId={id as string}
-        status="READ"
-        title="Books Read"
-      />
+      <View style={styles.listContainer}>
+        <Pressable onPress={() => router.push({
+          pathname: '/bookshelf/[id]',
+          params: { id: id as string, section: 'READ' }
+        })}>
+          <Surface style={styles.listItem}>
+            <View style={styles.listIconContainer}>
+              <MaterialCommunityIcons name="check-circle" size={24} color={colors.siennaBrown} />
+            </View>
+            <Text style={styles.listText}>Read</Text>
+            <Text style={styles.listNumber}>{stats.booksRead}</Text>
+            <IconButton icon="chevron-right" size={24} iconColor={colors.warmBrown} />
+          </Surface>
+        </Pressable>
+        
+        <Pressable onPress={() => router.push({
+          pathname: '/bookshelf/[id]',
+          params: { id: id as string, section: 'WANT_TO_READ' }
+        })}>
+          <Surface style={styles.listItem}>
+            <View style={styles.listIconContainer}>
+              <MaterialCommunityIcons name="bookmark" size={24} color={colors.siennaBrown} />
+            </View>
+            <Text style={styles.listText}>Want to Read</Text>
+            <Text style={styles.listNumber}>{stats.booksToRead}</Text>
+            <IconButton icon="chevron-right" size={24} iconColor={colors.warmBrown} />
+          </Surface>
+        </Pressable>
 
-      <BookshelfPreview
-        userId={id as string}
-        status="WANT_TO_READ"
-        title="Want to Read"
-      />
+      </View>
+
+      <View style={styles.cardsContainer}>
+        <Pressable 
+          onPress={() => {
+            if (favoriteBook !== '-') {
+              router.push({
+                pathname: '/bookshelf',
+                params: { userId: id, section: 'READ' }
+              });
+            }
+          }}
+          style={styles.cardWrapper}
+        >
+          <Surface style={styles.infoCard}>
+            <View style={styles.cardIconContainer}>
+              <MaterialCommunityIcons name="trophy" size={24} color={colors.siennaBrown} />
+            </View>
+            <Text style={styles.cardTitle}>Favorite Book</Text>
+            <Text style={styles.cardValue}>{favoriteBook}</Text>
+          </Surface>
+        </Pressable>
+      </View>
 
       <PersonalFeed userId={id as string} isOwnProfile={isOwnProfile} />
 
-      {isOwnProfile ? (
-        <View style={styles.profileActions}>
-          <EditProfileButton />
-          <ShareProfileButton 
-            userId={id as string} 
-            username={profile.username || profile.name}
-          />
-        </View>
-      ) : ( null
-      )}
+      <MenuModal 
+        visible={menuVisible}
+        onClose={() => setMenuVisible(false)}
+      />
     </ScrollView>
   );
 }
@@ -237,6 +424,14 @@ const styles = StyleSheet.create({
   headerButtons: {
     flexDirection: 'row',
     gap: 8,
+  },
+  headerLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backButton: {
+    marginRight: 8,
+    backgroundColor: colors.softBrown,
   },
   name: {
     fontWeight: '700',
@@ -302,48 +497,105 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 4,
   },
-  bookshelves: {
+  listContainer: {
+    gap: 12,
+    margin: 16,
+  },
+  listItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
     padding: 16,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
   },
-  bookshelvesTitle: {
-    fontSize: 18,
-    fontWeight: "600",
-    marginBottom: 16,
+  listIconContainer: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    backgroundColor: colors.softBrown,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 12,
   },
-  bookshelf: {
-    marginBottom: 24,
-  },
-  bookshelfTitle: {
+  listText: {
+    flex: 1,
     fontSize: 16,
-    fontWeight: "500",
-    marginBottom: 12,
+    color: colors.siennaBrown,
+    fontWeight: '500',
   },
-  bookPreview: {
-    flexDirection: "row",
-    height: 150,
-    backgroundColor: "#f8f8f8",
-    borderRadius: 12,
+  listNumber: {
+    marginRight: 8,
+    color: colors.siennaBrown,
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  cardsContainer: {
+    flexDirection: 'row',
+    gap: 12,
     padding: 16,
-    alignItems: "center",
+    flexWrap: 'wrap',
   },
-  bookCover: {
-    width: 80,
-    height: 120,
-    borderRadius: 8,
+  cardWrapper: {
+    minWidth: '40%',
+    flexGrow: 1,
+    flexShrink: 1,
   },
-  recentActivity: {
-    fontSize: 18,
-    fontWeight: "600",
+  infoCard: {
     padding: 16,
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.1,
+    shadowRadius: 3,
+  },
+  cardIconContainer: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: colors.softBrown,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  cardTitle: {
+    color: colors.warmBrown,
+    fontSize: 14,
+    textAlign: 'center',
+  },
+  cardValue: {
+    fontSize: 16,
+    fontWeight: 'bold',
+    color: colors.siennaBrown,
+    marginTop: 4,
+    textAlign: 'center',
+    flexWrap: 'wrap',
+  },
+  goalCard: {
+    minWidth: '45%',
+    flexGrow: 1,
+    flexShrink: 1,
+    padding: 16,
+    alignItems: 'center',
+  },
+  goalStatText: {
+    fontSize: 13,
+    color: colors.warmBrown,
+    marginTop: 4,
   },
   loadingContainer: {
     justifyContent: 'center',
     alignItems: 'center',
   },
-  profileActions: {
-    flexDirection: "row",
-    gap: 12,
-    padding: 16,
+  clickableLabel: {
+    textDecorationLine: 'underline',
   },
   headerTitle: {
     fontSize: 24,

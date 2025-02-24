@@ -24,3 +24,13 @@ export const Colors = {
     tabIconSelected: tintColorDark,
   },
 };
+
+export const colors = {
+  desertSand: '#DF5B39F',
+  warmBrown: '#A27C62',
+  lightKhaki: '#F2EBD4',
+  siennaBrown: '#9A634E',
+  goldenSand: '#EAD0B3',
+  softBrown: 'rgba(162, 124, 98, 0.1)',
+  cream: '#F2EBD4', // alias for lightKhaki for backward compatibility
+};

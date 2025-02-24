@@ -8,7 +8,10 @@
     "icon": "./assets/images/icon.png",
     "ios": {
       "bundleIdentifier": "com.worm.app",
-      "googleServicesFile": "./GoogleService-Info.plist"
+      "googleServicesFile": "./GoogleService-Info.plist",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
     },
     "extra": {
       "eas": {

@@ -50,7 +50,7 @@ interface CommentPayload {
 
 const ITEMS_PER_PAGE = 10;
 
-export default function FeedScreen() {
+function HomeScreen() {
   const router = useRouter();
   const { supabase } = useSupabase();
   const { user } = useAuth();
@@ -387,6 +387,8 @@ export default function FeedScreen() {
     </SafeAreaView>
   );
 }
+
+export default HomeScreen;
 
 const styles = StyleSheet.create({
   container: {
